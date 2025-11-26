@@ -8,3 +8,4 @@ Bundle-Vendor: customer
 Fragment-Host: org.adempiere.ui.zk;bundle-version="12.0.0"
 Automatic-Module-Name: tw.idempiere.UI.customer.theme
 Bundle-RequiredExecutionEnvironment: JavaSE-17
+Bundle-ClassPath: .
