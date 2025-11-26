@@ -47,3 +47,6 @@ iDempiere auto-imports when plug-in loads.
 
 ## 6. Summary Workflow
 DEV → PackOut → Plug-in META-INF → Deploy → Auto PackIn
+
+## 7. note
+https://hackmd.io/@2GrxaqznSJKLrhmXwCaeug/ryMrGDQZWl
