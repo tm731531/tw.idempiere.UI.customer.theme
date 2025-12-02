@@ -1,0 +1,10 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: Oms
+Bundle-SymbolicName: tw.idempiere.oms
+Bundle-Version: 1.0.0.qualifier
+Require-Bundle: org.adempiere.plugin.utils;bundle-version="12.0.0",
+ org.adempiere.base;bundle-version="12.0.0"
+Automatic-Module-Name: tw.idempiere.oms
+Bundle-Activator: org.adempiere.plugin.utils.Incremental2PackActivator
+Bundle-RequiredExecutionEnvironment: JavaSE-17
