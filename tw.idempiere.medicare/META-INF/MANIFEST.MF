@@ -1,0 +1,14 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: Medicare
+Bundle-SymbolicName: tw.idempiere.medicare
+Bundle-Version: 1.0.0.qualifier
+Require-Bundle: org.adempiere.base;bundle-version="12.0.0",
+ com.google.gson;bundle-version="2.9.0",
+ org.adempiere.plugin.utils;bundle-version="12.0.0",
+ zk;bundle-version="10.0.1",
+ org.adempiere.ui.zk;bundle-version="12.0.0",
+ org.adempiere.ui;bundle-version="12.0.0"
+Service-Component: OSGI-INF/tw.idempiere.medicare.processFactory.xml
+Automatic-Module-Name: tw.idempiere.medicare
+Bundle-RequiredExecutionEnvironment: JavaSE-17
