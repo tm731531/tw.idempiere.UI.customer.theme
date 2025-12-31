@@ -1,6 +1,7 @@
 package tw.idempiere.medicare.process;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
@@ -9,8 +10,9 @@ import org.compiere.model.MColumn;
 import org.compiere.model.MTable;
 import org.compiere.model.PO;
 import org.compiere.process.SvrProcess;
-import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
+
+import com.google.gson.*;
+import tw.idempiere.medicare.helper.SuggestionParser;
 
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -19,57 +21,195 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
+
 public class GenerateSuggestion extends SvrProcess {
 
 	private int recordId;
 
-    @Override
-    protected void prepare() {
-        recordId = getRecord_ID();
-    }
+	@Override
+	protected void prepare() {
+		recordId = getRecord_ID();
+	}
 
-    @Override
-    protected String doIt() throws Exception {
+	@Override
+	protected String doIt() throws Exception {
 
-        if (recordId <= 0) {
-            throw new AdempiereException("No record selected");
-        }
+		if (recordId <= 0) {
+			throw new AdempiereException("No record selected");
+		}
 
-        // 🔑 這裡直接用 Table Name（你改成你的）
-        String tableName = "z_medicare";
+		// 🔑 這裡直接用 Table Name（你改成你的）
+		String tableName = "z_medicare";
 
-        // 1️⃣ 動態取得 PO
-        MTable table = MTable.get(getCtx(), tableName);
-        PO po = table.getPO(recordId, get_TrxName());
+		// 1️⃣ 動態取得 PO
+		MTable table = MTable.get(getCtx(), tableName);
+		PO po = table.getPO(recordId, get_TrxName());
 
-        if (po == null) {
-            throw new AdempiereException("Record not found");
-        }
-        // 取得 PO
-        String suggestion = buildSuggestion(po);
-//        // 2️⃣ 組 Suggestion
-//        String suggestion = buildSuggestion(table, po);
+		if (po == null) {
+			throw new AdempiereException("Record not found");
+		}
+		// 取得 PO
+		String suggestion = buildSuggestion(po);
+		// 3️⃣ 回寫欄位
 
-        // 3️⃣ 回寫欄位
-        po.set_ValueOfColumn("Description", suggestion);
-        po.saveEx();
+		String readableText = SuggestionParser.buildReadableSuggestion(suggestion);
+		po.set_ValueOfColumn("Description", readableText);
+//        po.set_ValueOfColumn("Text", suggestion);
+		po.set_ValueOfColumn("Text", fixMarkdownTables(suggestion));
+		po.saveEx();
 
-        return "Suggestion generated";
-    }
-    private String buildSuggestion(PO po) {
-    	
-    	JsonObject json = new JsonObject(); // 空 {}
+		return "Suggestion generated";
+	}
+	private String fixMarkdownTables(String orgJson) {
+	    Gson gson = new GsonBuilder().setPrettyPrinting().create();
+	    JsonArray root = JsonParser.parseString(orgJson).getAsJsonArray();
 
-    	try {
-			return postToWebhook(
-			    "https://n8n.hcchiang.com/webhook/6a1c49f3-2da8-41e4-8171-f196998e4cbf",
-			    json
-			);
+	    for (JsonElement elem : root) {
+	        JsonObject obj = elem.getAsJsonObject();
+	        JsonArray outputs = obj.getAsJsonArray("output");
+
+	        for (JsonElement secElem : outputs) {
+	            JsonObject section = secElem.getAsJsonObject();
+	            String content = section.get("section_content").getAsString();
+
+	            String[] lines = content.split("\n");
+	            List<String> headers = new ArrayList<>();
+	            StringBuilder sb = new StringBuilder();
+
+	            for (String line : lines) {
+	                line = line.trim();
+
+	                // 跳過表格分隔線
+	                if (line.matches("\\|[-:\\s|]+\\|?")) {
+	                    continue;
+	                }
+
+	                // 處理表格行
+	                if (line.startsWith("|")) {
+	                    String[] cols = line.split("\\|", -1);
+	                    List<String> trimmedCols = new ArrayList<>();
+	                    for (String c : cols) trimmedCols.add(c.trim());
+
+	                    // 空行或只有 | 就跳過
+	                    if (trimmedCols.size() <= 1) continue;
+
+	                    // 第一行當作欄位標題
+	                    if (headers.isEmpty()) {
+	                        int startIndex = trimmedCols.get(0).isEmpty() ? 1 : 0;
+	                        headers.addAll(trimmedCols.subList(startIndex, trimmedCols.size()));
+	                        continue;
+	                    }
+
+	                    // 內容行轉成清單
+	                    String mainTitle = trimmedCols.get(0);
+	                    if (mainTitle.isEmpty() && trimmedCols.size() > 1) {
+	                        mainTitle = trimmedCols.get(1);
+	                    }
+	                    sb.append("- ").append(mainTitle).append("\n");
+
+	                    for (int i = 1; i < trimmedCols.size(); i++) {
+	                        if (i - 1 >= headers.size()) break;
+	                        String title = headers.get(i - 1);
+	                        String value = trimmedCols.get(i);
+	                        if (!value.isEmpty()) { // 避免多餘的 ** ：
+	                            sb.append("  ").append(String.valueOf(i)).append(" ").append(title).append("：").append(value).append("\n");
+	                        }
+	                    }
+	                    sb.append("\n");
+	                } else {
+	                    // 普通文字直接保留
+	                    sb.append(line).append("\n");
+	                }
+	            }
+
+	            // 更新 section_content
+	            section.addProperty("section_content", sb.toString().trim());
+	        }
+	    }
+
+	    return gson.toJson(root);
+	}
+//	private String fixMarkdownTables(String orgJson) {
+//		Gson gson = new GsonBuilder().setPrettyPrinting().create();
+//		JsonArray root = JsonParser.parseString(orgJson).getAsJsonArray();
+//
+//		for (JsonElement elem : root) {
+//			JsonObject obj = elem.getAsJsonObject();
+//			JsonArray outputs = obj.getAsJsonArray("output");
+//
+//			for (JsonElement secElem : outputs) {
+//				JsonObject section = secElem.getAsJsonObject();
+//				String content = section.get("section_content").getAsString();
+//
+//				String[] lines = content.split("\n");
+//				boolean inTable = false;
+//				List<String> headers = new ArrayList<>();
+//				StringBuilder sb = new StringBuilder();
+//
+//				for (String line : lines) {
+//					line = line.trim();
+//
+//					// 跳過表格分隔線
+//					if (line.matches("\\|[-:\\s|]+\\|?")) {
+//						continue;
+//					}
+//
+//					// 處理表格行
+//					if (line.startsWith("|")) {
+//						String[] cols = line.split("\\|", -1);
+//						List<String> trimmedCols = new ArrayList<>();
+//						for (String c : cols)
+//							trimmedCols.add(c.trim());
+//
+//						// 空行或只有 | 就跳過
+//						if (trimmedCols.size() <= 1)
+//							continue;
+//
+//						// 第一行當作標題
+//						if (headers.isEmpty()) {
+//							// 避開第一個空欄
+//							int startIndex = trimmedCols.get(0).isEmpty() ? 1 : 0;
+//							headers.addAll(trimmedCols.subList(startIndex, trimmedCols.size()));
+//							continue;
+//						}
+//
+//						// 內容行轉成清單
+//						sb.append("* ").append(trimmedCols.get(0)).append("\n"); // 第一欄作為主標題
+//						for (int i = 1; i < trimmedCols.size(); i++) {
+//							if (i - 1 >= headers.size())
+//								break; // 防止超過標題數量
+//							String title = headers.get(i - 1);
+//							String value = trimmedCols.get(i);
+//							if (!value.isEmpty()) { // 避免多餘的 ** ：
+//								sb.append("  ** ").append(title).append("：").append(value).append("\n");
+//							}
+//						}
+//						sb.append("\n");
+//					} else {
+//						// 普通文字直接保留
+//						sb.append(line).append("\n");
+//					}
+//				}
+//
+//				// 更新 content
+//				section.addProperty("section_content", sb.toString().trim());
+//			}
+//		}
+//
+//		return gson.toJson(root);
+//	}
+
+	private String buildSuggestion(PO po) {
+
+		JsonObject json = new JsonObject(); // 空 {}
+
+		try {
+			return postToWebhook("https://n8n.hcchiang.com/webhook/6a1c49f3-2da8-41e4-8171-f196998e4cbf", json);
 		} catch (Exception e) {
 			// TODO Auto-generated catch block
 			return e.getMessage();
 		}
-    	
+
 //        StringBuilder sb = new StringBuilder();
 //
 //        // 取出必要欄位
@@ -139,79 +279,73 @@ public class GenerateSuggestion extends SvrProcess {
 //        sb.append("建議：配合定期追蹤及門診超音波檢查。\n");
 //
 //        return sb.toString();
-    }
-    private String postToWebhook(String webhookUrl, JsonObject json) throws Exception {
+	}
 
-        URL url = new URL(webhookUrl);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+	private String postToWebhook(String webhookUrl, JsonObject json) throws Exception {
 
-        conn.setRequestMethod("POST");
-        conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
-        conn.setDoOutput(true);
-     // ⛔ 不要太短，真的在等結果
-        conn.setConnectTimeout(10000);
-        conn.setReadTimeout(60000); // 👈 至少 30~60 秒
+		URL url = new URL(webhookUrl);
+		HttpURLConnection conn = (HttpURLConnection) url.openConnection();
 
-        try (OutputStream os = conn.getOutputStream()) {
-            os.write(json.toString().getBytes(StandardCharsets.UTF_8));
-            os.flush();
-        }
+		conn.setRequestMethod("POST");
+		conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+		conn.setDoOutput(true);
+		// ⛔ 不要太短，真的在等結果
+		conn.setConnectTimeout(10000);
+		conn.setReadTimeout(60000); // 👈 至少 30~60 秒
 
-        int code = conn.getResponseCode();
+		try (OutputStream os = conn.getOutputStream()) {
+			os.write(json.toString().getBytes(StandardCharsets.UTF_8));
+			os.flush();
+		}
 
-        InputStream is = (code >= 400)
-            ? conn.getErrorStream()
-            : conn.getInputStream();
+		int code = conn.getResponseCode();
 
-        StringBuilder sb = new StringBuilder();
-        try (BufferedReader br = new BufferedReader(
-                new InputStreamReader(is, StandardCharsets.UTF_8))) {
+		InputStream is = (code >= 400) ? conn.getErrorStream() : conn.getInputStream();
 
-            String line;
-            while ((line = br.readLine()) != null) {
-                sb.append(line);
-            }
-        }
+		StringBuilder sb = new StringBuilder();
+		try (BufferedReader br = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
 
-        // 🔑 GSON parse
-        return sb.toString();
-    }
-    private String buildSuggestion(MTable table, PO po) {
+			String line;
+			while ((line = br.readLine()) != null) {
+				sb.append(line);
+			}
+		}
 
-        StringBuilder sb = new StringBuilder();
+		// 🔑 GSON parse
+		return sb.toString();
+	}
 
-        for (MColumn col : table.getColumns(false)) {
+	private String buildSuggestion(MTable table, PO po) {
 
-            String colName = col.getColumnName();
+		StringBuilder sb = new StringBuilder();
 
-            // ❌ 排除系統欄位 & 自己
-            if (isSkipColumn(colName)) {
-                continue;
-            }
+		for (MColumn col : table.getColumns(false)) {
 
-            Object value = po.get_Value(colName);
-            if (value == null) {
-                continue;
-            }
+			String colName = col.getColumnName();
 
-            sb.append(col.getName())   // 使用顯示名稱
-              .append("：")
-              .append(value)
-              .append("\n");
-        }
+			// ❌ 排除系統欄位 & 自己
+			if (isSkipColumn(colName)) {
+				continue;
+			}
 
-        return sb.toString();
-    }
-    private boolean isSkipColumn(String colName) {
+			Object value = po.get_Value(colName);
+			if (value == null) {
+				continue;
+			}
 
-        return colName.equalsIgnoreCase("Description")
-            || colName.equalsIgnoreCase("AD_Client_ID")
-            || colName.equalsIgnoreCase("AD_Org_ID")
-            || colName.equalsIgnoreCase("IsActive")
-            || colName.equalsIgnoreCase("Created")
-            || colName.equalsIgnoreCase("CreatedBy")
-            || colName.equalsIgnoreCase("Updated")
-            || colName.equalsIgnoreCase("UpdatedBy");
-    }
+			sb.append(col.getName()) // 使用顯示名稱
+					.append("：").append(value).append("\n");
+		}
+
+		return sb.toString();
+	}
+
+	private boolean isSkipColumn(String colName) {
+
+		return colName.equalsIgnoreCase("Description") || colName.equalsIgnoreCase("AD_Client_ID")
+				|| colName.equalsIgnoreCase("AD_Org_ID") || colName.equalsIgnoreCase("IsActive")
+				|| colName.equalsIgnoreCase("Created") || colName.equalsIgnoreCase("CreatedBy")
+				|| colName.equalsIgnoreCase("Updated") || colName.equalsIgnoreCase("UpdatedBy");
+	}
 
 }
