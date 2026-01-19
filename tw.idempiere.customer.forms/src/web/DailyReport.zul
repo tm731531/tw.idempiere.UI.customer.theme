@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<zk xmlns:h="native">
+    <!-- Load Chart.js (UMD version) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+    
+    <window apply="tw.idempiere.customer.forms.DailyReportController" height="100%" width="100%">
+        <vlayout vflex="1" spacing="10px">
+            <hlayout spacing="15px" style="padding:10px; background:#f5f5f5; border-bottom:1px solid #ccc;" valign="middle">
+                <label value="每日營運概況報表 (夥伴分類)" style="font-size:20px; font-weight:bold; color: #333;" />
+                <separator orient="vertical" bar="true" height="20px" />
+                <label value="業務夥伴篩選: " style="font-weight:bold;" />
+                <div id="bpDiv" hflex="1" style="min-width:250px; border:1px solid #ddd; border-radius:4px; background:white;" />
+                <button id="btnRefresh" label="重新整理" iconSclass="zk-icon-refresh" />
+            </hlayout>
+            
+            <hlayout spacing="20px" style="padding:10px;">
+                <div hflex="1" style="background:#e3f2fd; padding:15px; border-radius:8px; border:1px solid #bbdefb; text-align:center;">
+                    <label value="今日全夥伴銷貨總數" style="display:block; color:#1976d2; font-size:14px;" />
+                    <label id="lblSalesToday" value="0" style="font-size:28px; font-weight:bold; color:#0d47a1;" />
+                </div>
+                <div hflex="1" style="background:#fff3e0; padding:15px; border-radius:8px; border:1px solid #ffe0b2; text-align:center;">
+                    <label value="今日全夥伴採購總數" style="display:block; color:#e65100; font-size:14px;" />
+                    <label id="lblPurchaseToday" value="0" style="font-size:28px; font-weight:bold; color:#bf360c;" />
+                </div>
+            </hlayout>
+
+            <!-- Container for the chart -->
+            <div id="chartDiv" hflex="1" vflex="1" style="padding:10px; background:white; border:1px solid #ddd; border-radius:10px; margin:10px;">
+                <label value="圖表區塊初始化中..." style="color:#999;" />
+            </div>
+        </vlayout>
+
+        <script><![CDATA[
+            // Helper to generate dynamic colors
+            var dynamicColors = function() {
+                var r = Math.floor(Math.random() * 255);
+                var g = Math.floor(Math.random() * 255);
+                var b = Math.floor(Math.random() * 255);
+                return "rgb(" + r + "," + g + "," + b + ")";
+            };
+
+            window.renderChannelChart = function(labels, datasetsObj) {
+                console.log("Channel Chart Initializing...");
+                
+                var wgt = zk.Widget.$('$chartDiv');
+                if (!wgt || !wgt.$n()) {
+                    setTimeout(function() { window.renderChannelChart(labels, datasetsObj); }, 200);
+                    return;
+                }
+                
+                var container = wgt.$n();
+                var ChartLib = window.Chart;
+                if (!ChartLib) {
+                    setTimeout(function() { window.renderChannelChart(labels, datasetsObj); }, 300);
+                    return;
+                }
+                
+                container.innerHTML = '';
+                var canvas = document.createElement('canvas');
+                container.appendChild(canvas);
+                
+                // Convert JSON Map to Chart.js Datasets
+                var chartDatasets = [];
+                for (var channelName in datasetsObj) {
+                    var color = dynamicColors();
+                    chartDatasets.push({
+                        label: channelName,
+                        data: datasetsObj[channelName],
+                        borderColor: color,
+                        backgroundColor: color.replace('rgb', 'rgba').replace(')', ', 0.1)'),
+                        fill: false,
+                        tension: 0.4
+                    });
+                }
+                
+                new ChartLib(canvas, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: chartDatasets
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { 
+                                position: 'right',
+                                labels: { boxWidth: 12, font: { size: 12 } }
+                            },
+                            title: { display: true, text: '近七日合作夥伴營運趨勢' }
+                        },
+                        scales: {
+                            y: { beginAtZero: true, ticks: { stepSize: 1 } }
+                        }
+                    }
+                });
+            }
+        ]]></script>
+    </window>
+</zk>

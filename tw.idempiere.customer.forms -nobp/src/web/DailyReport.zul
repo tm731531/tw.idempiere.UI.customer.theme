@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<zk xmlns:h="native">
+    <!-- Load Chart.js (UMD version) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+    
+    <window apply="tw.idempiere.customer.forms.DailyReportController" height="100%" width="100%">
+        <vlayout vflex="1" spacing="10px">
+            <hlayout spacing="10px" style="padding:10px;" valign="middle">
+                <label value="每日營運概況報表 (JS 版)" style="font-size:24px; font-weight:bold;" />
+                <button id="btnRefresh" label="刷新" iconSclass="zk-icon-refresh" />
+            </hlayout>
+            
+            <hlayout spacing="20px" style="padding:10px;">
+                <div style="background:#f0f8ff; padding:20px; border-radius:10px;">
+                    <label value="今日銷貨訂單數: " />
+                    <label id="lblSalesToday" value="計算中..." style="font-size:18px; color:blue;" />
+                </div>
+                <div style="background:#fff0f5; padding:20px; border-radius:10px;">
+                    <label value="今日採購訂單數: " />
+                    <label id="lblPurchaseToday" value="計算中..." style="font-size:18px; color:red;" />
+                </div>
+            </hlayout>
+
+            <!-- Container for the chart -->
+            <div id="chartDiv" hflex="1" vflex="1" style="padding:20px; background:white; border:1px solid #ddd; border-radius:10px;">
+                <label value="圖表區塊初始化中..." style="color:#999;" />
+            </div>
+        </vlayout>
+
+        <script><![CDATA[
+            window.renderDailyChart = function(labels, salesData, purchaseData) {
+                console.log("Render Chart Triggered");
+                
+                // Use ZK Widget lookup is much more reliable than UUID in iDempiere
+                var wgt = zk.Widget.$('$chartDiv');
+                if (!wgt || !wgt.$n()) {
+                    console.warn("chartDiv not mounted yet, retrying...");
+                    setTimeout(function() { window.renderDailyChart(labels, salesData, purchaseData); }, 200);
+                    return;
+                }
+                
+                var container = wgt.$n();
+                var ChartLib = window.Chart;
+                if (!ChartLib) {
+                    console.warn("Chart.js not found, retrying...");
+                    setTimeout(function() { window.renderDailyChart(labels, salesData, purchaseData); }, 300);
+                    return;
+                }
+                
+                // Clear and create canvas
+                container.innerHTML = '';
+                var canvas = document.createElement('canvas');
+                canvas.style.width = '100%';
+                canvas.style.height = '100%';
+                container.appendChild(canvas);
+                
+                new ChartLib(canvas, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Sales Orders',
+                            data: salesData,
+                            borderColor: 'blue',
+                            backgroundColor: 'rgba(0, 0, 255, 0.1)',
+                            fill: true,
+                            tension: 0.3
+                        }, {
+                            label: 'Purchase Orders',
+                            data: purchaseData,
+                            borderColor: 'red',
+                            backgroundColor: 'rgba(255, 0, 0, 0.1)',
+                            fill: true,
+                            tension: 0.3
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: { beginAtZero: true }
+                        }
+                    }
+                });
+                console.log("Chart rendering success!");
+            }
+        ]]></script>
+    </window>
+</zk>

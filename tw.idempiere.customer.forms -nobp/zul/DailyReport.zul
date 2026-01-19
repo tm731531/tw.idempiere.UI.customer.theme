@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<zk>
+    <window apply="tw.idempiere.customer.forms.DailyReportController" height="100%" width="100%">
+        <vlayout vflex="1">
+            <label value="每日營運概況報表" style="font-size:24px; font-weight:bold; padding:10px;" />
+            
+            <hlayout spacing="20px" style="padding:10px;">
+                <div style="background:#f0f8ff; padding:20px; border-radius:10px;">
+                    <label value="今日銷貨訂單數: " />
+                    <label value="計算中..." id="lblSalesToday" style="font-size:18px; color:blue;" />
+                </div>
+                <div style="background:#fff0f5; padding:20px; border-radius:10px;">
+                    <label value="今日採購訂單數: " />
+                    <label value="計算中..." id="lblPurchaseToday" style="font-size:18px; color:red;" />
+                </div>
+            </hlayout>
+
+            <chart id="reportChart" title="最近七日訂單統計" width="800px" height="400px" 
+                   type="line" threeD="false" fgAlpha="128" vflex="1" />
+        </vlayout>
+    </window>
+</zk>

@@ -1,0 +1,25 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: Customer Forms Plugin
+Bundle-SymbolicName: tw.idempiere.customer.forms;singleton:=true
+Bundle-Version: 1.0.0.qualifier
+Bundle-Vendor: Custom
+Bundle-ActivationPolicy: lazy
+Bundle-Activator: tw.idempiere.customer.forms.MyActivator
+Bundle-RequiredExecutionEnvironment: JavaSE-17
+Require-Bundle: org.adempiere.base,
+ org.adempiere.plugin.utils,
+ org.adempiere.ui.zk,
+ org.adempiere.ui,
+ org.idempiere.zk.extra,
+ zcommon,
+ zel,
+ zhtml,
+ zk,
+ zkbind,
+ zkplus,
+ zul,
+ zweb
+Import-Package: org.osgi.framework;version="[1.10.0,2.0.0]",
+ org.osgi.service.component.annotations;version="1.5.1"
+Service-Component: OSGI-INF/*.xml

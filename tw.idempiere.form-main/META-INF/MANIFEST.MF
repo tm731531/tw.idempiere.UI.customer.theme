@@ -1,0 +1,24 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: Form
+Bundle-SymbolicName: tw.idempiere.form
+Bundle-Version: 1.0.0.qualifier
+Require-Bundle: org.adempiere.ui.zk;bundle-version="12.0.0",
+ org.adempiere.base;bundle-version="12.0.0",
+ zweb;bundle-version="10.0.1",
+ org.adempiere.plugin.utils;bundle-version="12.0.0",
+ org.adempiere.ui;bundle-version="12.0.0",
+ org.idempiere.zk.extra;bundle-version="12.0.0",
+ zcommon;bundle-version="10.0.1",
+ zel;bundle-version="10.0.1",
+ zhtml;bundle-version="10.0.1",
+ zk;bundle-version="10.0.1",
+ zkbind;bundle-version="10.0.1",
+ zkplus;bundle-version="10.0.1",
+ zul;bundle-version="10.0.1"
+Service-Component: OSGI-INF/tw.idempiere.form.foctories.WorkflowEditorFactory.xml
+Bundle-Vendor: Ray Lee
+Automatic-Module-Name: tw.idempiere.form
+Bundle-ClassPath: src/,
+ .
+Bundle-RequiredExecutionEnvironment: JavaSE-17
