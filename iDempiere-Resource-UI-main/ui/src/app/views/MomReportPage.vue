@@ -14,12 +14,28 @@ const records = ref<MomData[]>([])
 const dateFrom = ref(new Date(new Date().setDate(new Date().getDate() - 7)).toISOString().split('T')[0])
 const dateTo = ref(new Date().toISOString().split('T')[0])
 
-// Pie Chart Statistics (的精神狀態 - morningMentalStatus)
+// Chart Metric Selection
+const chartMetric = ref<keyof MomData>('morningMentalStatus')
+const availableMetrics = [
+  { label: '起床精神', value: 'morningMentalStatus' },
+  { label: '昨夜睡眠', value: 'lastNightSleep' },
+  { label: '睡前狀況', value: 'beforeSleepStatus' },
+  { label: '早餐', value: 'breakfast' },
+  { label: '午餐', value: 'lunch' },
+  { label: '晚餐', value: 'dinner' },
+  { label: '活動', value: 'dailyActivity' },
+  { label: '排泄狀況', value: 'excretionStatus' },
+  { label: '洗澡', value: 'bathing' },
+]
+
+// Pie Chart Statistics based on selected metric
 const stats = computed(() => {
   const map = new Map<string, number>()
+  const metricKey = chartMetric.value
   for (const r of records.value) {
-    if (r.morningMentalStatus) {
-      map.set(r.morningMentalStatus, (map.get(r.morningMentalStatus) || 0) + 1)
+    const val = r[metricKey]
+    if (val && typeof val === 'string') {
+      map.set(val, (map.get(val) || 0) + 1)
     }
   }
   return Array.from(map.entries()).map(([label, count]) => ({ label, count }))
@@ -34,11 +50,15 @@ const pieSlices = computed(() => {
   
   // Semantic Color Mapping
   const getColor = (label: string, index: number) => {
-    if (label === '正常' || label === '穩定') return '#10b981' // emerald-500
-    if (label === '亢奮') return '#fbbf24' // amber-400
-    if (label === '疲憊') return '#94a3b8' // slate-400
+    const positive = ['正常', '穩定', '完成', '良好', '優良']
+    const neutral = ['一般', '尚可', '未完成']
+    const negative = ['亢奮', '疲憊', '差', '極差', '異常']
+
+    if (positive.includes(label)) return '#10b981' // emerald-500
+    if (negative.includes(label)) return '#f87171' // red-500
+    if (neutral.includes(label)) return '#fbbf24' // amber-400
     
-    const colors = ['#60a5fa', '#a78bfa', '#f472b6', '#f87171']
+    const colors = ['#60a5fa', '#a78bfa', '#f472b6', '#94a3b8']
     return colors[index % colors.length]
   }
 
@@ -47,7 +67,6 @@ const pieSlices = computed(() => {
     const startAngle = currentAngle
     currentAngle += angle
 
-    // Handle 100% case
     if (angle >= 359.9) {
       return {
         label: s.label,
@@ -58,7 +77,6 @@ const pieSlices = computed(() => {
       }
     }
 
-    // SVG arc calculation
     const x1 = 50 + 40 * Math.cos((startAngle - 90) * Math.PI / 180)
     const y1 = 50 + 40 * Math.sin((startAngle - 90) * Math.PI / 180)
     const x2 = 50 + 40 * Math.cos((currentAngle - 90) * Math.PI / 180)
@@ -101,6 +119,18 @@ function formatDate(dateStr: string) {
   return dateStr.split(' ')[0]
 }
 
+function getStatusBadgeClass(label?: string) {
+  if (!label) return 'bg-slate-50 text-slate-400'
+  const positive = ['正常', '穩定', '完成', '良好', '優良']
+  const neutral = ['一般', '尚可', '未完成']
+  const negative = ['亢奮', '疲憊', '差', '極差', '異常']
+
+  if (positive.includes(label)) return 'bg-emerald-100 text-emerald-700'
+  if (negative.includes(label)) return 'bg-rose-100 text-rose-700'
+  if (neutral.includes(label)) return 'bg-amber-100 text-amber-700'
+  return 'bg-blue-100 text-blue-700'
+}
+
 onMounted(() => {
   loadData()
 })
@@ -119,18 +149,20 @@ watch([dateFrom, dateTo], () => {
           <h1 class="text-lg font-semibold">Mom 報表</h1>
           <p class="mt-1 text-sm text-slate-600">管理與回顧每日健康狀態</p>
         </div>
-        <div class="flex items-center gap-2">
-          <input 
-            v-model="dateFrom"
-            type="date"
-            class="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-          />
-          <span class="text-slate-400">至</span>
-          <input 
-            v-model="dateTo"
-            type="date"
-            class="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-          />
+        <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2">
+            <input 
+              v-model="dateFrom"
+              type="date"
+              class="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+            />
+            <span class="text-slate-400">至</span>
+            <input 
+              v-model="dateTo"
+              type="date"
+              class="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -139,9 +171,22 @@ watch([dateFrom, dateTo], () => {
 
     <!-- Chart and Stats Summary -->
     <div class="grid gap-6 lg:grid-cols-3">
-      <!-- Pie Chart -->
+      <!-- Pie Chart Section -->
       <div class="lg:col-span-2 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 class="text-base font-semibold mb-6">精神狀態分佈 (起床時刻)</h2>
+        <div class="flex items-center justify-between mb-6">
+          <h2 class="text-base font-semibold">
+            {{ availableMetrics.find(m => m.value === chartMetric)?.label }}分佈
+          </h2>
+          <select 
+            v-model="chartMetric"
+            class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+          >
+            <option v-for="m in availableMetrics" :key="m.value" :value="m.value">
+              {{ m.label }}
+            </option>
+          </select>
+        </div>
+
         <div v-if="loading" class="flex h-64 items-center justify-center">
           <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500"></div>
         </div>
@@ -171,11 +216,11 @@ watch([dateFrom, dateTo], () => {
               </template>
             </svg>
           </div>
-          <div class="grid grid-cols-2 gap-4">
+          <div class="grid grid-cols-2 gap-x-8 gap-y-4">
             <div v-for="(slice, i) in pieSlices" :key="i" class="flex items-center gap-2">
               <div class="w-3 h-3 rounded-full" :style="{ backgroundColor: slice.color }"></div>
               <span class="text-sm text-slate-700 font-medium">{{ slice.label }}</span>
-              <span class="text-sm text-slate-500">({{ slice.count }})</span>
+              <span class="text-sm text-slate-500">({{ slice.count }} 筆, {{ slice.percent }}%)</span>
             </div>
           </div>
         </div>
@@ -183,11 +228,20 @@ watch([dateFrom, dateTo], () => {
 
       <!-- Quick Summary Card -->
       <div class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 class="text-base font-semibold mb-4">本週概覽</h2>
+        <h2 class="text-base font-semibold mb-6">統計概覽</h2>
         <div class="space-y-4">
-          <div class="flex items-center justify-between p-3 rounded-xl bg-slate-50">
-            <span class="text-sm text-slate-600">總記錄天數</span>
-            <span class="text-lg font-bold">{{ records.length }}</span>
+          <div class="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-100">
+            <span class="text-sm text-slate-600 font-medium">總記錄天數</span>
+            <span class="text-xl font-bold text-brand-600">{{ records.length }}</span>
+          </div>
+          <div class="p-4 rounded-xl bg-slate-50 border border-slate-100">
+            <div class="text-xs text-slate-400 mb-2 uppercase tracking-wider font-semibold">熱門指標</div>
+            <div class="space-y-2">
+              <div v-for="slice in pieSlices.slice(0, 3)" :key="slice.label" class="flex items-center justify-between text-sm">
+                <span class="text-slate-700">{{ slice.label }}</span>
+                <span class="font-semibold text-slate-900">{{ slice.percent }}%</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -195,57 +249,47 @@ watch([dateFrom, dateTo], () => {
 
     <!-- Data Table -->
     <div class="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-      <div class="p-6 border-b border-slate-100">
-        <h2 class="text-base font-semibold">每日明細</h2>
+      <div class="p-6 border-b border-slate-100 flex items-center justify-between">
+        <h2 class="text-base font-semibold">每日明細紀錄</h2>
+        <div class="text-xs text-slate-400">共 {{ records.length }} 筆記錄</div>
       </div>
       <div class="overflow-x-auto">
-        <table class="w-full text-left text-sm">
+        <table class="w-full text-left text-sm border-collapse">
           <thead>
-            <tr class="bg-slate-50 text-slate-600 font-medium">
-              <th class="px-6 py-3">日期</th>
-              <th class="px-6 py-3">姓名</th>
-              <th class="px-6 py-3">夜間活動</th>
-              <th class="px-6 py-3">睡前狀況</th>
-              <th class="px-6 py-3">昨夜睡眠</th>
-              <th class="px-6 py-3">起床精神</th>
-              <th class="px-6 py-3">早餐</th>
-              <th class="px-6 py-3">午餐</th>
-              <th class="px-6 py-3">晚餐</th>
-              <th class="px-6 py-3">排泄狀況</th>
-              <th class="px-6 py-3">洗澡</th>
-              <th class="px-6 py-3">活動</th>
-              <th class="px-6 py-3">備註</th>
+            <tr class="bg-slate-50 text-slate-600 font-semibold border-b border-slate-100">
+              <th class="px-6 py-4">日期</th>
+              <th class="px-6 py-4">姓名</th>
+              <th class="px-6 py-4">夜間活動</th>
+              <th class="px-6 py-4">睡前狀況</th>
+              <th class="px-6 py-4">昨夜睡眠</th>
+              <th class="px-6 py-4">起床精神</th>
+              <th class="px-6 py-4">早餐</th>
+              <th class="px-6 py-4">午餐</th>
+              <th class="px-6 py-4">晚餐</th>
+              <th class="px-6 py-4">排泄狀況</th>
+              <th class="px-6 py-4">洗澡</th>
+              <th class="px-6 py-4">活動</th>
+              <th class="px-6 py-4">備註</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-for="row in records" :key="row.id" class="hover:bg-slate-50 transition-colors">
-              <td class="px-6 py-4 whitespace-nowrap">{{ formatDate(row.documentDate) }}</td>
-              <td class="px-6 py-4 font-medium text-slate-900">{{ row.name }}</td>
-              <td class="px-6 py-4">{{ row.nightActivity || '—' }}</td>
-              <td class="px-6 py-4">{{ row.beforeSleepStatus || '—' }}</td>
-              <td class="px-6 py-4">{{ row.lastNightSleep || '—' }}</td>
-              <td class="px-6 py-4">
-                <span 
-                  class="px-2 py-1 rounded-full text-xs font-medium"
-                  :class="{
-                    'bg-emerald-100 text-emerald-700': row.morningMentalStatus === '穩定' || row.morningMentalStatus === '正常',
-                    'bg-amber-100 text-amber-700': row.morningMentalStatus === '亢奮',
-                    'bg-slate-100 text-slate-700': row.morningMentalStatus === '疲憊'
-                  }"
-                >
-                  {{ row.morningMentalStatus || '—' }}
-                </span>
-              </td>
-              <td class="px-6 py-4">{{ row.breakfast || '—' }}</td>
-              <td class="px-6 py-4">{{ row.lunch || '—' }}</td>
-              <td class="px-6 py-4">{{ row.dinner || '—' }}</td>
-              <td class="px-6 py-4">{{ row.excretionStatus || '—' }}</td>
-              <td class="px-6 py-4">{{ row.bathing || '—' }}</td>
-              <td class="px-6 py-4">{{ row.dailyActivity || '—' }}</td>
-              <td class="px-6 py-4 text-slate-500 max-w-xs truncate">{{ row.description || '—' }}</td>
+            <tr v-for="row in records" :key="row.id" class="hover:bg-slate-50/50 transition-colors">
+              <td class="px-6 py-4 whitespace-nowrap text-slate-500 font-medium">{{ formatDate(row.documentDate) }}</td>
+              <td class="px-6 py-4 font-bold text-slate-900">{{ row.name }}</td>
+              <td class="px-6 py-4"><span :class="['px-2 py-0.5 rounded-full text-xs font-medium', getStatusBadgeClass(row.nightActivity)]">{{ row.nightActivity || '—' }}</span></td>
+              <td class="px-6 py-4"><span :class="['px-2 py-0.5 rounded-full text-xs font-medium', getStatusBadgeClass(row.beforeSleepStatus)]">{{ row.beforeSleepStatus || '—' }}</span></td>
+              <td class="px-6 py-4"><span :class="['px-2 py-0.5 rounded-full text-xs font-medium', getStatusBadgeClass(row.lastNightSleep)]">{{ row.lastNightSleep || '—' }}</span></td>
+              <td class="px-6 py-4"><span :class="['px-2 py-0.5 rounded-full text-xs font-medium shadow-sm', getStatusBadgeClass(row.morningMentalStatus)]">{{ row.morningMentalStatus || '—' }}</span></td>
+              <td class="px-6 py-4"><span :class="['px-2 py-0.5 rounded-full text-xs font-medium', getStatusBadgeClass(row.breakfast)]">{{ row.breakfast || '—' }}</span></td>
+              <td class="px-6 py-4"><span :class="['px-2 py-0.5 rounded-full text-xs font-medium', getStatusBadgeClass(row.lunch)]">{{ row.lunch || '—' }}</span></td>
+              <td class="px-6 py-4"><span :class="['px-2 py-0.5 rounded-full text-xs font-medium', getStatusBadgeClass(row.dinner)]">{{ row.dinner || '—' }}</span></td>
+              <td class="px-6 py-4"><span :class="['px-2 py-0.5 rounded-full text-xs font-medium', getStatusBadgeClass(row.excretionStatus)]">{{ row.excretionStatus || '—' }}</span></td>
+              <td class="px-6 py-4"><span :class="['px-2 py-0.5 rounded-full text-xs font-medium', getStatusBadgeClass(row.bathing)]">{{ row.bathing || '—' }}</span></td>
+              <td class="px-6 py-4"><span :class="['px-2 py-0.5 rounded-full text-xs font-medium', getStatusBadgeClass(row.dailyActivity)]">{{ row.dailyActivity || '—' }}</span></td>
+              <td class="px-6 py-4 text-slate-500 max-w-xs truncate italic text-xs">{{ row.description || '—' }}</td>
             </tr>
             <tr v-if="records.length === 0 && !loading">
-              <td colspan="13" class="px-6 py-8 text-center text-slate-500">尚無相關記錄</td>
+              <td colspan="13" class="px-6 py-12 text-center text-slate-400 italic">目前區間尚無相關健康紀錄</td>
             </tr>
           </tbody>
         </table>
