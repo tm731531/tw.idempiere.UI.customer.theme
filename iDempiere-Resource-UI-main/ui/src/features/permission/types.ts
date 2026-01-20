@@ -96,6 +96,13 @@ export const MENU_ITEMS: MenuItem[] = [
     path: '/report',
     description: '期末庫存、總客戶數、今日收款等',
   },
+  {
+    id: 'J',
+    name: 'Mom 報表',
+    tableName: 'Z_momSystem',
+    path: '/mom-report',
+    description: '檢視 Mom 系統每日健康報告與統計',
+  },
 ]
 
 // System 專用選單
