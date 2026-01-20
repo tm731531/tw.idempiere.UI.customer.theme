@@ -63,9 +63,10 @@ if not exist "%SERVLET_API_JAR%" (
 :: 4. Java 編譯
 echo [3/5] 編譯 Java 原始碼...
 if not exist "%BUILD_CLASSES_DIR%" mkdir "%BUILD_CLASSES_DIR%"
-javac -encoding UTF-8 -cp "%SERVLET_API_JAR%" -d "%BUILD_CLASSES_DIR%" ^
-"%PLUGIN_DIR%\src\tw\mxp\emui\SpaFilter.java" ^
-"%PLUGIN_DIR%\src\tw\mxp\emui\SpaServlet.java"
+:: 先將檔案清單組合起來
+set "JAVA_SOURCES="%PLUGIN_DIR%\src\tw\mxp\emui\SpaFilter.java" "%PLUGIN_DIR%\src\tw\mxp\emui\SpaServlet.java""
+:: 執行編譯
+javac -encoding UTF-8 -cp "%SERVLET_API_JAR%" -d "%BUILD_CLASSES_DIR%" %JAVA_SOURCES%
 
 :: 5. 打包 JAR (徹底解決 SoɮשΥؿ 亂碼問題)
 echo [4/5] 打包 JAR...
@@ -95,22 +96,22 @@ if exist "%WEB_SRC%\assets" (
 popd
 
 :: 6. 部署
-echo [5/5] 部署至 Docker...
+:: echo [5/5] 部署至 Docker...
 :: 驗證檔案是否真的在那裡
-if exist "%FULL_JAR_PATH%" (
-    docker ps --format "{{.Names}}" | findstr /X "idempiere-app" >nul
-    if !ERRORLEVEL! equ 0 (
-        echo 正在部署至 idempiere-app...
-        docker cp "%FULL_JAR_PATH%" idempiere-app:/opt/idempiere/plugins/
-        docker restart idempiere-app
-        echo 部署完成。
-    ) else (
-        echo [提示] 容器 idempiere-app 未啟動，請手動執行: 
-        echo docker cp "%FULL_JAR_PATH%" idempiere-app:/opt/idempiere/plugins/
-    )
-) else (
-    echo [錯誤] JAR 檔案未能生成於 %FULL_JAR_PATH%
-)
+:: if exist "%FULL_JAR_PATH%" (
+::     docker ps --format "{{.Names}}" | findstr /X "idempiere-app" >nul
+::     if !ERRORLEVEL! equ 0 (
+::         echo 正在部署至 idempiere-app...
+::         docker cp "%FULL_JAR_PATH%" idempiere-app:/opt/idempiere/plugins/
+::         docker restart idempiere-app
+::         echo 部署完成。
+::     ) else (
+::         echo [提示] 容器 idempiere-app 未啟動，請手動執行: 
+::         echo docker cp "%FULL_JAR_PATH%" idempiere-app:/opt/idempiere/plugins/
+::     )
+:: ) else (
+::     echo [錯誤] JAR 檔案未能生成於 %FULL_JAR_PATH%
+:: )
 
-echo.
+:: echo.
 pause
