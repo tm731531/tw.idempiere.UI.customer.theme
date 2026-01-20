@@ -1,0 +1,39 @@
+services:
+  dev-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: vite-dev-server
+    ports:
+      - "8888:5173"
+    volumes:
+      - ./ui:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - VITE_API_IP=192.168.0.93
+      - VITE_DEFAULT_USER=SuperUser
+      - VITE_DEFAULT_PASS=System
+    command: bun run dev -- --host 0.0.0.0 --port 5173
+    restart: unless-stopped
+
+  opencode-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: opencode-dev-web
+    ports:
+      - "5555:5555"
+    volumes:
+      - .:/app
+      - opencode-data:/root/.local/share/opencode/
+      - ${USERPROFILE}/.ssh:/root/.ssh:ro
+      - ${USERPROFILE}/.gitconfig:/root/.gitconfig:ro
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+    command: opencode web --hostname 0.0.0.0 --port 5555
+    restart: unless-stopped
+
+volumes:
+  opencode-data:
