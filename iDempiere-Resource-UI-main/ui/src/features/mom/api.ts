@@ -22,6 +22,8 @@ export interface MomData {
     excretionStatus?: string
     bathing?: string
     safetyIncident?: string
+    docStatus?: string
+    isProcessed?: boolean
 }
 
 function getIdentifier(val: any): string {
@@ -42,7 +44,7 @@ export async function listMomData(
     pagination?: { top?: number; skip?: number }
 ): Promise<{ records: MomData[]; totalCount?: number }> {
     const searchParams: Record<string, string | number | boolean> = {
-        $select: 'Z_momSystem_ID,DateDoc,Name,Description,NightActivity,BeforeSleepStatus,LastNightSleep,MorningMentalStatus,Breakfast,DailyActivity,Lunch,outgoing,Dinner,Companionship,ExcretionStatus,Bathing,SafetyIncident',
+        $select: 'Z_momSystem_ID,DateDoc,Name,Description,NightActivity,BeforeSleepStatus,LastNightSleep,MorningMentalStatus,Breakfast,DailyActivity,Lunch,outgoing,Dinner,Companionship,ExcretionStatus,Bathing,SafetyIncident,DocStatus,Processed',
         $orderby: 'DateDoc desc',
     }
 
@@ -84,6 +86,8 @@ export async function listMomData(
         excretionStatus: getIdentifier(r.ExcretionStatus),
         bathing: getIdentifier(r.Bathing),
         safetyIncident: getIdentifier(r.SafetyIncident),
+        docStatus: getIdentifier(r.DocStatus),
+        isProcessed: r.Processed === 'Y' || r.Processed === true
     }))
 
     return {
@@ -188,6 +192,48 @@ export async function updateMomData(token: string, id: number, data: MomPayload)
     });
 }
 
+export async function completeMomRecord(token: string, id: number): Promise<void> {
+    const url = `${API_V1}/models/Z_momSystem/${id}/docaction/CO`;
+    await ky.put(url, {
+        headers: { Authorization: `Bearer ${token}` }
+    });
+}
+
+/**
+ * Runs a specific iDempiere Process to complete/close the MOM record.
+ * This implementation follows the user-provided pattern:
+ * POST /api/v1/processes/{processValue}
+ * Body: { "table-id": 1000000, "record-id": 1000040 }
+ * 
+ * It dynamically discovers whether to use 'Z_momSystem_Process' or 'Z_momSystem-Process'.
+ */
+export async function runMomCompleteProcess(token: string, recordId: number, tableId?: number): Promise<void> {
+    // 1. Discover the correct Process Value (underscore vs hyphen)
+    const options = ['z_momsystem-process', 'Z_momSystem_Process'];
+    let processValue = options[0]; // Default fallback
+
+    const url = `${API_V1}/processes/${processValue}`;
+
+    // 2. Discover Table ID
+    let targetTableId = tableId;
+    if (!targetTableId) {
+        const tableParams = { $filter: "TableName eq 'Z_momSystem'", $select: 'AD_Table_ID' };
+        const tableRes = await apiFetch<{ records: { id: number }[] }>(`${API_V1}/models/AD_Table`, { token, searchParams: tableParams });
+        if (tableRes.records && tableRes.records.length > 0) {
+            targetTableId = tableRes.records[0].id;
+        }
+    }
+
+    // 3. Run Process
+    await ky.post(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        json: {
+            "table-id": targetTableId,
+            "record-id": recordId
+        }
+    });
+}
+
 /**
  * Call Google Gemini API using official SDK.
  * Implements fallback logic to handle 404/503 errors.
@@ -253,6 +299,19 @@ export async function getGeminiApiKey(token: string): Promise<string | null> {
  * Fetch column metadata including Field Labels (Name), Reference Lists, and Default Values.
  * Returns { options: Map<ColName, List[]>, labels: Map<ColName, Label>, defaults: Map<ColName, Val> }
  */
+/**
+ * Utility to search for processes related to MomReport.
+ * This helps identify the correct AD_Process_ID or Value for the 'Complete' action.
+ */
+export async function findMomProcess(token: string): Promise<any[]> {
+    const searchParams = {
+        $filter: "Name contains 'Mom' or Value contains 'Mom' or Description contains 'Mom'",
+        $select: 'AD_Process_ID,Value,Name,Description'
+    };
+    const res = await apiFetch<{ records: any[] }>(`${API_V1}/models/AD_Process`, { token, searchParams });
+    return res.records || [];
+}
+
 export async function fetchMomColumnMetadata(token: string): Promise<{
     options: Record<string, { value: string, label: string }[]>,
     labels: Record<string, string>,

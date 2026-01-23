@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import ErrorMessage from '../../components/ErrorMessage.vue'
 import { useAuth } from '../../features/auth/store'
-import { listMomData, type MomData, getLatestMomRecordId, uploadMomAttachment, createMomData, updateMomData, generateGeminiContent, getGeminiApiKey, fetchMomColumnMetadata, type MomPayload } from '../../features/mom/api'
+import { listMomData, type MomData, getLatestMomRecordId, uploadMomAttachment, createMomData, updateMomData, generateGeminiContent, getGeminiApiKey, fetchMomColumnMetadata, type MomPayload, completeMomRecord, runMomCompleteProcess } from '../../features/mom/api'
 import { toPng } from 'html-to-image'
 import jsPDF from 'jspdf'
 import html2pdf from 'html2pdf.js'
@@ -265,6 +265,24 @@ async function handleSave() {
     finally { loading.value = false }
 }
 
+async function handleComplete(id: number) {
+    if (!auth.token.value) return
+    if (!confirm('您確定要執行完成程序嗎？執行後紀錄將會鎖定。')) return
+    loading.value = true
+    try {
+        // Calling the dedicated process instead of just updating the status
+        await runMomCompleteProcess(auth.token.value, id)
+        successMessage.value = '完成程序已成功執行！'
+        setTimeout(() => successMessage.value = null, 3000)
+        loadData()
+    } catch (e: any) {
+        error.value = `程序執行失敗: ${e.message || e}`
+        setTimeout(() => error.value = null, 5000)
+    } finally {
+        loading.value = false
+    }
+}
+
 async function exportAndAttach() {
   if (!auth.token.value || !reportArea.value || exporting.value) return
   exporting.value = true
@@ -453,7 +471,7 @@ watch([dateFrom, dateTo], () => loadData())
                 <th style="padding:10px; border-bottom:2px solid #cbd5e1;">活動狀況</th>
                 <th style="padding:10px; border-bottom:2px solid #cbd5e1;">生理維護</th>
                 <th style="padding:10px; text-align:left; border-bottom:2px solid #cbd5e1;">備註 (Memo)</th>
-                <th style="padding:10px; border-bottom:2px solid #cbd5e1;" class="no-export">編輯</th>
+                <th style="padding:10px; border-bottom:2px solid #cbd5e1;" class="no-export">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -501,9 +519,13 @@ watch([dateFrom, dateTo], () => loadData())
                 </td>
                 <!-- Description -->
                 <td style="padding:10px; color:#64748b; font-style:italic; vertical-align:top; border-left:1px dashed #f1f5f9;">{{ row.description || '—' }}</td>
-                <!-- Edit -->
+                <!-- Actions -->
                 <td style="padding:10px; text-align:center;" class="no-export">
-                   <button @click="openEditModal(row)" class="text-blue-600 font-bold hover:underline">編輯</button>
+                   <div class="flex flex-col gap-1 items-center">
+                      <button v-if="!row.isProcessed" @click="openEditModal(row)" class="text-blue-600 font-bold hover:underline text-xs">編輯</button>
+                      <button v-if="!row.isProcessed" @click="handleComplete(row.id)" class="text-emerald-600 font-bold hover:underline text-xs">鎖定</button>
+                      <span v-else class="text-slate-400 font-bold text-[11px] italic">🔒已鎖定</span>
+                   </div>
                 </td>
               </tr>
             </tbody>
