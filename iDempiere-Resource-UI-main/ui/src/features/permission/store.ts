@@ -24,19 +24,17 @@ export function usePermission() {
   // 是否為 System 用戶
   const isSystem = computed(() => userType.value === 'System')
 
-  // 可見選單列表
   const visibleMenuItems = computed<MenuItem[]>(() => {
+    // 僅保留 'Mom 報表' (ID 'J')
+    const momOnly = MENU_ITEMS.filter(item => item.id === 'J')
+
     if (userType.value === 'System') {
-      // System 用戶看到所有選單 + System 專用選單
-      return [...MENU_ITEMS, ...SYSTEM_MENU_ITEMS]
+      // System 用戶僅看到 'Mom 報表'
+      return momOnly
     }
 
-    // User：如果沒有設定任何權限，預設開放所有選單
-    // 有設定權限時，只看到已啟用的選單
-    if (enabledMenuIds.value.length === 0) {
-      return MENU_ITEMS
-    }
-    return MENU_ITEMS.filter(item => enabledMenuIds.value.includes(item.id))
+    // User：僅看到 'Mom 報表'
+    return momOnly
   })
 
   // 檢查選單是否可見

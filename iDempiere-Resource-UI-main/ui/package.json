@@ -12,6 +12,7 @@
     "lint:fix": "bunx --bun eslint . --fix"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@headlessui/vue": "^1.7.23",
     "html-to-image": "^1.11.13",
     "html2pdf.js": "^0.14.0",

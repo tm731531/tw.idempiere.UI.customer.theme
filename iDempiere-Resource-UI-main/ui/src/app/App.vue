@@ -68,7 +68,7 @@ onMounted(() => {
           </div>
           <div>
             <div class="text-sm font-semibold leading-tight">
-              預約系統
+              照顧系統
             </div>
             <div class="text-xs text-slate-500">
               iDempiere Resource

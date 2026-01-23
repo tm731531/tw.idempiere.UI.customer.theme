@@ -1,5 +1,6 @@
 import ky from 'ky'
 import { apiFetch } from '../../shared/api/http'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 
 const API_V1 = '/api/v1'
 
@@ -25,7 +26,10 @@ export interface MomData {
 
 function getIdentifier(val: any): string | undefined {
     if (!val) return undefined
-    if (typeof val === 'object' && val.identifier) return String(val.identifier)
+    if (typeof val === 'object') {
+        // Return .id (the code/value) if available, otherwise identifier, otherwise val
+        return val.id ? String(val.id) : (val.identifier ? String(val.identifier) : String(val))
+    }
     return String(val)
 }
 
@@ -142,4 +146,233 @@ export async function uploadMomAttachment(
             data: base64Data
         }
     });
+}
+
+/**
+ * Payload for creating/updating Mom data
+ * We map the camelCase frontend properties to the PascalCase/Specific column names of the backend.
+ */
+export interface MomPayload {
+    DateDoc: string
+    Name: string
+    Description?: string
+    NightActivity?: string
+    BeforeSleepStatus?: string
+    LastNightSleep?: string
+    MorningMentalStatus?: string
+    Breakfast?: string
+    DailyActivity?: string
+    Lunch?: string
+    outgoing?: string
+    Dinner?: string
+    Companionship?: string
+    ExcretionStatus?: string
+    Bathing?: string
+    SafetyIncident?: string
+}
+
+export async function createMomData(token: string, data: MomPayload): Promise<number> {
+    const url = `${API_V1}/models/Z_momSystem`;
+    const res = await ky.post(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        json: data
+    }).json<{ id: number }>();
+    return res.id;
+}
+
+export async function updateMomData(token: string, id: number, data: MomPayload): Promise<void> {
+    const url = `${API_V1}/models/Z_momSystem/${id}`;
+    await ky.put(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        json: data
+    });
+}
+
+/**
+ * Call Google Gemini API using official SDK.
+ * Implements fallback logic to handle 404/503 errors.
+ */
+export async function generateGeminiContent(apiKey: string, prompt: string): Promise<string> {
+    const genAI = new GoogleGenerativeAI(apiKey);
+
+    // Priority list of models to attempt.
+    const models = [
+        "gemini-3-flash-preview", // User requested (often 503)
+        "gemini-2.0-flash-exp",   // New experimental
+        "gemini-1.5-flash",       // Standard flash
+        "gemini-pro"              // Stable fallback
+    ];
+
+    let lastError: any = null;
+
+    for (const modelName of models) {
+        try {
+            console.log(`[AI] Attempting model: ${modelName}...`);
+            const model = genAI.getGenerativeModel({ model: modelName });
+            const result = await model.generateContent(prompt);
+            const response = await result.response;
+            return response.text();
+        } catch (e: any) {
+            console.warn(`[AI] Model ${modelName} failed:`, e.message || e);
+            lastError = e;
+            // Continue to next model
+        }
+    }
+
+    console.error('Gemini SDK All Models Failed:', lastError);
+    throw new Error(lastError?.message || 'All AI models failed. Please try again later.');
+}
+
+/**
+ * Fetch the Gemini API Key from iDempiere System Configuration (AD_SysConfig).
+ * Expects a record with Name = 'GEMINI_API_KEY'.
+ */
+export async function getGeminiApiKey(token: string): Promise<string | null> {
+    try {
+        const searchParams = {
+            $filter: "Name eq 'GEMINI_API_KEY'",
+            $select: 'Value'
+        };
+
+        const res = await apiFetch<{ records: { Value: string }[] }>(
+            `${API_V1}/models/AD_SysConfig`,
+            { token, searchParams }
+        );
+
+        if (res.records && res.records.length > 0) {
+            return res.records[0].Value;
+        }
+        return null;
+    } catch (e) {
+        console.error('Failed to fetch GEMINI_API_KEY from config:', e);
+        return null;
+    }
+}
+
+/**
+ * Fetch column metadata including Field Labels (Name), Reference Lists, and Default Values.
+ * Returns { options: Map<ColName, List[]>, labels: Map<ColName, Label>, defaults: Map<ColName, Val> }
+ */
+export async function fetchMomColumnMetadata(token: string): Promise<{
+    options: Record<string, { value: string, label: string }[]>,
+    labels: Record<string, string>,
+    defaults: Record<string, string>
+}> {
+    const result = {
+        options: {} as Record<string, { value: string, label: string }[]>,
+        labels: {} as Record<string, string>,
+        defaults: {} as Record<string, string>
+    };
+
+    try {
+        // 1. Get Table ID via Model API on AD_Table
+        const tableParams = {
+            $filter: "TableName eq 'Z_momSystem'",
+            $select: 'AD_Table_ID'
+        };
+        console.log('[Meta] Fetching table ID for Z_momSystem...');
+        const tableRes = await apiFetch<{ records: { id: number }[] }>(`${API_V1}/models/AD_Table`, { token, searchParams: tableParams });
+        if (!tableRes.records || tableRes.records.length === 0) {
+            console.warn('[Meta] Z_momSystem table not found in AD_Table');
+            return result;
+        }
+
+        const tableId = tableRes.records[0].id;
+        console.log('[Meta] Table ID:', tableId);
+
+        // 2. Get Columns using the Table ID
+        // Fetch ALL columns to get labels (Name) and DefaultValue
+        const colParams = {
+            $filter: `AD_Table_ID eq ${tableId}`,
+            $select: 'ColumnName,Name,AD_Reference_Value_ID,AD_Reference_ID,DefaultValue'
+        };
+        const colRes = await apiFetch<{
+            records: {
+                id: number,
+                ColumnName: string,
+                Name: string,
+                DefaultValue?: string,
+                AD_Reference_ID: { id: number },
+                AD_Reference_Value_ID?: { id: number }
+            }[]
+        }>(`${API_V1}/models/AD_Column`, { token, searchParams: colParams });
+
+        console.log(`[Meta] Found ${colRes.records?.length || 0} columns total.`);
+
+        const colIdToName = new Map<number, string>();
+
+        for (const col of colRes.records || []) {
+            const colId = col.id;
+            if (colId) colIdToName.set(colId, col.ColumnName);
+
+            // Store Label (Name) - this is the translated "Chinese" field name
+            result.labels[col.ColumnName] = col.Name;
+
+            // Store Default Value if present (and remove surrounding quotes if any)
+            if (col.DefaultValue) {
+                // Remove ' around strings like 'Y' or 'N'
+                result.defaults[col.ColumnName] = col.DefaultValue.replace(/^'|'$/g, '');
+            }
+
+            // If it is a List (17), fetch options
+            if (col.AD_Reference_ID?.id === 17 && col.AD_Reference_Value_ID?.id) {
+                const refId = col.AD_Reference_Value_ID.id;
+                console.log(`[Meta] Processing list column: ${col.ColumnName}, RefValueID: ${refId}`);
+
+                const refRes = await apiFetch<{ reflist?: { name: string, value: string }[] }>(`${API_V1}/reference/${refId}`, { token });
+
+                if (refRes.reflist) {
+                    console.log(`[Meta] Fetched ${refRes.reflist.length} options for ${col.ColumnName}`);
+                    result.options[col.ColumnName] = refRes.reflist.map(r => ({
+                        value: r.value,
+                        label: r.name
+                    }));
+                } else {
+                    console.warn(`[Meta] No reflist found for ${col.ColumnName} (RefID: ${refId})`);
+                }
+            }
+        }
+
+        // 3. Get Defaults from AD_Field (Priority over AD_Column)
+        // Find AD_Tab associated with this table
+        console.log('[Meta] Fetching AD_Tab for table...');
+        const tabParams = {
+            $filter: `AD_Table_ID eq ${tableId}`,
+            $select: 'AD_Tab_ID'
+        };
+        const tabRes = await apiFetch<{ records: { id: number }[] }>(`${API_V1}/models/AD_Tab`, { token, searchParams: tabParams });
+
+        if (tabRes.records && tabRes.records.length > 0) {
+            const tabId = tabRes.records[0].id;
+            console.log('[Meta] Found AD_Tab_ID:', tabId);
+
+            // Get Fields (Fetch all for tab, then filter in memory due to "ne" operator issues)
+            const fieldParams = {
+                $filter: `AD_Tab_ID eq ${tabId}`,
+                $select: 'AD_Column_ID,DefaultValue'
+            };
+            const fieldRes = await apiFetch<{ records: { AD_Column_ID: { id: number }, DefaultValue: string }[] }>(
+                `${API_V1}/models/AD_Field`,
+                { token, searchParams: fieldParams }
+            );
+
+            console.log(`[Meta] Found ${fieldRes.records?.length || 0} fields with defaults.`);
+
+            for (const f of fieldRes.records || []) {
+                if (f.AD_Column_ID?.id && f.DefaultValue) {
+                    const cName = colIdToName.get(f.AD_Column_ID.id);
+                    if (cName) {
+                        // Overwrite AD_Column default with AD_Field default
+                        // Remove ' around strings
+                        result.defaults[cName] = f.DefaultValue.replace(/^'|'$/g, '');
+                    }
+                }
+            }
+        }
+
+    } catch (e) {
+        console.error('Failed to fetch MOM metadata:', e);
+    }
+
+    return result;
 }
