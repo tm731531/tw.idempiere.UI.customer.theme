@@ -5,6 +5,7 @@ import { useAuth } from '../../features/auth/store'
 import { listMomData, type MomData, getLatestMomRecordId, uploadMomAttachment, createMomData, updateMomData, generateGeminiContent, getGeminiApiKey, fetchMomColumnMetadata, type MomPayload } from '../../features/mom/api'
 import { toPng } from 'html-to-image'
 import jsPDF from 'jspdf'
+import html2pdf from 'html2pdf.js'
 
 const auth = useAuth()
 
@@ -81,8 +82,8 @@ const availableMetrics = computed(() => [
   { label: fieldLabels.value['dailyActivity'] || '活動', value: 'dailyActivity' },
   { label: fieldLabels.value['excretionStatus'] || '排泄狀況', value: 'excretionStatus' },
   { label: fieldLabels.value['bathing'] || '洗澡', value: 'bathing' },
-  { label: fieldLabels.value['outgoing'] || '外出', value: 'outgoing' },
-  { label: fieldLabels.value['companionship'] || '陪伴', value: 'companionship' },
+  { label: '外出狀況', value: 'outgoing' },
+  { label: '陪伴狀況', value: 'companionship' },
   { label: fieldLabels.value['nightActivity'] || '夜間活動', value: 'nightActivity' },
   { label: fieldLabels.value['safetyIncident'] || '安全事件', value: 'safetyIncident' }
 ])
@@ -170,19 +171,19 @@ function openCreateModal() {
         documentDate: fieldDefaults.value.documentDate || new Date().toISOString().split('T')[0],
         name: fieldDefaults.value.name || '孫玉美',
         description: fieldDefaults.value.description || '',
-        nightActivity: resolve('nightActivity', '完成'),
-        beforeSleepStatus: resolve('beforeSleepStatus', '正常'),
-        lastNightSleep: resolve('lastNightSleep', '良好'),
-        morningMentalStatus: resolve('morningMentalStatus', '穩定'),
-        breakfast: resolve('breakfast', '正常'),
-        dailyActivity: resolve('dailyActivity', '完成'),
-        lunch: resolve('lunch', '正常'),
-        outgoing: resolve('outgoing', '完成'),
-        dinner: resolve('dinner', '正常'),
-        companionship: resolve('companionship', '穩定'),
-        excretionStatus: resolve('excretionStatus', '正常'),
-        bathing: resolve('bathing', '完成'),
-        safetyIncident: resolve('safetyIncident', '無')
+        nightActivity: resolve('nightActivity', ''),
+        beforeSleepStatus: resolve('beforeSleepStatus', ''),
+        lastNightSleep: resolve('lastNightSleep', ''),
+        morningMentalStatus: resolve('morningMentalStatus', ''),
+        breakfast: resolve('breakfast', ''),
+        dailyActivity: resolve('dailyActivity', ''),
+        lunch: resolve('lunch', ''),
+        outgoing: resolve('outgoing', ''),
+        dinner: resolve('dinner', ''),
+        companionship: resolve('companionship', ''),
+        excretionStatus: resolve('excretionStatus', ''),
+        bathing: resolve('bathing', ''),
+        safetyIncident: resolve('safetyIncident', '')
     }
     showModal.value = true
 }
@@ -194,19 +195,19 @@ function openEditModal(row: MomData) {
         documentDate: row.documentDate ? row.documentDate.split(' ')[0] : '',
         name: row.name,
         description: row.description || '',
-        nightActivity: row.nightActivity || '無',
-        beforeSleepStatus: row.beforeSleepStatus || '正常',
-        lastNightSleep: row.lastNightSleep || '正常',
-        morningMentalStatus: row.morningMentalStatus || '正常',
-        breakfast: row.breakfast || '正常',
-        dailyActivity: row.dailyActivity || '正常',
-        lunch: row.lunch || '正常',
-        outgoing: row.outgoing || '無',
-        dinner: row.dinner || '正常',
-        companionship: row.companionship || '無',
-        excretionStatus: row.excretionStatus || '正常',
-        bathing: row.bathing || '正常',
-        safetyIncident: row.safetyIncident || '無'
+        nightActivity: row.nightActivity || '',
+        beforeSleepStatus: row.beforeSleepStatus || '',
+        lastNightSleep: row.lastNightSleep || '',
+        morningMentalStatus: row.morningMentalStatus || '',
+        breakfast: row.breakfast || '',
+        dailyActivity: row.dailyActivity || '',
+        lunch: row.lunch || '',
+        outgoing: row.outgoing || '',
+        dinner: row.dinner || '',
+        companionship: row.companionship || '',
+        excretionStatus: row.excretionStatus || '',
+        bathing: row.bathing || '',
+        safetyIncident: row.safetyIncident || ''
     }
     showModal.value = true
 }
@@ -220,7 +221,18 @@ async function handleAiGenerate() {
         const apiKey = await getGeminiApiKey(auth.token.value)
         if (!apiKey) throw new Error('未設定 API Key')
         const dataText = records.value.map(r => 
-            `日期: ${r.documentDate}, 精神: ${getLabel('morningMentalStatus', r.morningMentalStatus)}, 睡眠: ${getLabel('lastNightSleep', r.lastNightSleep)}, 備註: ${r.description || '無'}`
+            `日期: ${r.documentDate}, 精神: ${getLabel('morningMentalStatus', r.morningMentalStatus)},
+             睡眠: ${getLabel('lastNightSleep', r.lastNightSleep)},
+             睡前: ${getLabel('beforeSleepStatus', r.beforeSleepStatus)},
+             早餐: ${getLabel('breakfast', r.breakfast)},
+             午餐: ${getLabel('lunch', r.lunch)},
+             晚餐: ${getLabel('dinner', r.dinner)},
+             前晚活動: ${getLabel('nightActivity', r.nightActivity)},
+             早餐活動: ${getLabel('dailyActivity', r.dailyActivity)},
+             午餐外出: ${getLabel('outgoing', r.outgoing)},
+             晚餐陪伴: ${getLabel('companionship', r.companionship)},
+             排泄: ${getLabel('excretionStatus', r.excretionStatus)},
+             洗澡: ${getLabel('bathing', r.bathing)}, 備註: ${r.description || '無'}`
         ).join('\n')
         aiResult.value = await generateGeminiContent(apiKey, `請彙整摘要健康狀況：\n${dataText}`)
         showModal.value = false
@@ -234,7 +246,7 @@ async function handleSave() {
     if (!auth.token.value) return
     loading.value = true
     try {
-        const s = (v: string | undefined) => (v === '' ? undefined : v)
+        const s = (v: string | undefined) => (v === '' ? null : v)
         const payload: MomPayload = {
             DateDoc: form.value.documentDate, Name: form.value.name, Description: form.value.description,
             NightActivity: s(form.value.nightActivity), BeforeSleepStatus: s(form.value.beforeSleepStatus),
@@ -263,31 +275,7 @@ async function exportAndAttach() {
     const latestId = await getLatestMomRecordId(auth.token.value)
     if (!latestId) throw new Error('找不到最新的紀錄，請確認資料庫已有資料')
 
-    // 1. Capture DOM to Image
-    const dataUrl = await toPng(reportArea.value, { backgroundColor: '#ffffff', cacheBust: true })
-    
-    // 2. Setup jsPDF (Landscape A4: 297x210mm)
-    const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
-    const pdfWidth = pdf.internal.pageSize.getWidth()
-    const pdfHeight = pdf.internal.pageSize.getHeight()
-
-    const imgProps = pdf.getImageProperties(dataUrl)
-    const totalImgHeightInMm = (imgProps.height * pdfWidth) / imgProps.width
-
-    // 3. Multi-page Slicing Logic
-    let heightLeft = totalImgHeightInMm
-    let position = 0 // current vertical position in MM
-
-    while (heightLeft > 0) {
-      pdf.addImage(dataUrl, 'PNG', 0, position, pdfWidth, totalImgHeightInMm)
-      heightLeft -= pdfHeight
-      position -= pdfHeight
-      if (heightLeft > 0) {
-        pdf.addPage()
-      }
-    }
-
-    // 4. Custom Filename: 失智照顧 + YYYYMMDDHHMMSS
+    // 1. Custom Filename: 失智照顧 + YYYYMMDDHHMMSS
     const now = new Date()
     const timestamp = now.getFullYear().toString() + 
                       (now.getMonth() + 1).toString().padStart(2, '0') + 
@@ -297,8 +285,55 @@ async function exportAndAttach() {
                       now.getSeconds().toString().padStart(2, '0')
     const filename = `失智照顧${timestamp}.pdf`
 
+    // 2. Setup html2pdf options
+    const opt = {
+      margin: 10,
+      filename: filename,
+      image: { type: 'jpeg' as const, quality: 0.98 },
+      html2canvas: { 
+        scale: 2, 
+        useCORS: true, 
+        logging: false,
+        onclone: (doc: Document) => {
+          // html2canvas crashes on oklch() colors.
+          // Since the report uses inline styles, we strip all global styles to be safe.
+          const styles = doc.querySelectorAll('style, link[rel="stylesheet"]');
+          styles.forEach(s => s.remove());
+
+          // Inject minimal necessary styles back
+          const style = doc.createElement('style');
+          style.innerHTML = `
+            .no-export { display: none !important; }
+            .print-only { display: block !important; }
+            table { border-collapse: collapse; width: 100%; }
+            th, td { border: 1px solid #e2e8f0; }
+          `;
+          doc.head.appendChild(style);
+
+          // Remove oklch variables from root/body if any
+          const clean = (el: HTMLElement) => {
+            const s = el.getAttribute('style');
+            if (s && s.includes('oklch')) {
+              el.setAttribute('style', s.replace(/oklch\([^)]+\)/g, '#777'));
+            }
+          };
+          clean(doc.documentElement);
+          clean(doc.body);
+        }
+      },
+      jsPDF: { unit: 'mm' as const, format: 'a4' as const, orientation: 'landscape' as const },
+      pagebreak: { mode: ['avoid-all', 'css', 'legacy'] as any }
+    }
+
+    // 3. Generate PDF and Save Locally
+    const worker = html2pdf().set(opt).from(reportArea.value)
+    await worker.save()
+
+    // 4. Output Blob for Attachment
+    const pdfBlob = await worker.output('blob')
+
     // 5. Upload Attachment
-    await uploadMomAttachment(auth.token.value, latestId, pdf.output('blob'), filename)
+    await uploadMomAttachment(auth.token.value, latestId, pdfBlob, filename)
 
     successMessage.value = `報表已成功掛載至紀錄 (#${latestId})！檔名: ${filename}`
     setTimeout(() => { successMessage.value = null }, 5000)
@@ -362,13 +397,13 @@ watch([dateFrom, dateTo], () => loadData())
       </div>
 
       <!-- AI Result -->
-      <div v-if="aiResult" style="margin-bottom:30px; border:2px solid #a855f7; border-radius:12px; background:#faf5ff;">
+      <div v-if="aiResult" style="margin-bottom:30px; border:2px solid #a855f7; border-radius:12px; background:#faf5ff; page-break-inside: avoid; break-inside: avoid;">
         <div style="background:#a855f7; padding:10px 20px; color:#fff; font-weight:800; font-size:15px;">✨ AI 健康統整摘要</div>
         <div style="padding:20px; white-space:pre-wrap; font-size:13px; line-height:1.6; color:#4b5563;">{{ aiResult }}</div>
       </div>
 
       <!-- Analysis Section -->
-      <div style="display:flex; gap:20px; margin-bottom:30px">
+      <div style="display:flex; gap:20px; margin-bottom:30px; page-break-inside: avoid; break-inside: avoid;">
         <!-- Pie Chart -->
         <div style="flex:2; border:1px solid #e2e8f0; border-radius:12px; padding:25px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
@@ -407,7 +442,7 @@ watch([dateFrom, dateTo], () => loadData())
       <div style="border:1px solid #e2e8f0; border-radius:12px; overflow:hidden;">
         <div style="padding:15px 20px; background:#f8fafc; border-bottom:1px solid #e2e8f0; font-weight:800; font-size:14px;">每日健康紀錄完整清單</div>
         <div style="overflow-x:auto;">
-          <table style="width:100%; border-collapse:collapse; font-size:10px; min-width:1200px;">
+          <table style="width:100%; border-collapse:collapse; font-size:14px; min-width:1400px;">
             <thead style="background:#f1f5f9; color:#475569;">
               <tr>
                 <th style="padding:10px; text-align:left; border-bottom:2px solid #cbd5e1;">日期</th>
@@ -417,20 +452,25 @@ watch([dateFrom, dateTo], () => loadData())
                 <th style="padding:10px; border-bottom:2px solid #cbd5e1;">三餐狀況</th>
                 <th style="padding:10px; border-bottom:2px solid #cbd5e1;">活動狀況</th>
                 <th style="padding:10px; border-bottom:2px solid #cbd5e1;">生理維護</th>
-                <th style="padding:10px; text-align:left; border-bottom:2px solid #cbd5e1;">備註與 Memo</th>
+                <th style="padding:10px; text-align:left; border-bottom:2px solid #cbd5e1;">備註 (Memo)</th>
                 <th style="padding:10px; border-bottom:2px solid #cbd5e1;" class="no-export">編輯</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in records" :key="row.id" style="border-top:1px solid #e2e8f0;">
+              <tr v-for="row in records" :key="row.id" style="border-top:1px solid #e2e8f0; page-break-inside: avoid; break-inside: avoid;">
                 <td style="padding:10px; white-space:nowrap;">{{ formatDate(row.documentDate) }}</td>
                 <td style="padding:10px; font-weight:800; white-space:nowrap;">{{ row.name }}</td>
-                <!-- Mental & Sleep -->
+                <!-- Morning Mental -->
                 <td style="padding:10px; text-align:center;">
-                  <div style="margin-bottom:4px;">{{ getLabel('morningMentalStatus', row.morningMentalStatus) }}</div>
-                  <span :style="{ fontSize:'9px', color:'#94a3b8' }">睡前: {{ getLabel('beforeSleepStatus', row.beforeSleepStatus) }}</span>
+                  {{ getLabel('morningMentalStatus', row.morningMentalStatus) }}
                 </td>
-                <td style="padding:10px; text-align:center;">{{ getLabel('lastNightSleep', row.lastNightSleep) }}</td>
+                
+                <!-- Sleep -->
+                <td style="padding:10px; text-align:center;">
+                  <div style="margin-bottom:4px;">{{ getLabel('lastNightSleep', row.lastNightSleep) }}</div>
+                  <div style="font-size:12px; color:#94a3b8;">睡前: {{ getLabel('beforeSleepStatus', row.beforeSleepStatus) }}</div>
+                </td>
+
                 <!-- Meals -->
                 <td style="padding:10px; text-align:center;">
                    <div style="display:flex; justify-content:center; gap:4px; margin-bottom:4px;">
@@ -438,20 +478,25 @@ watch([dateFrom, dateTo], () => loadData())
                       <span :style="{ ...getBadgeStyle(getLabel('lunch', row.lunch)), padding:'1px 5px', borderRadius:'3px' }">午</span>
                       <span :style="{ ...getBadgeStyle(getLabel('dinner', row.dinner)), padding:'1px 5px', borderRadius:'3px' }">晚</span>
                    </div>
-                   <span style="font-size:9px; color:#94a3b8;">{{ getLabel('breakfast', row.breakfast) }}/{{ getLabel('lunch', row.lunch) }}</span>
+                   <div style="font-size:12px; color:#94a3b8;">{{ getLabel('breakfast', row.breakfast) }}/{{ getLabel('lunch', row.lunch) }}/{{ getLabel('dinner', row.dinner) }}</div>
                 </td>
+
                 <!-- Activity -->
                 <td style="padding:10px; text-align:center;">
-                   <div style="margin-bottom:4px;">{{ getLabel('dailyActivity', row.dailyActivity) }}</div>
-                   <div style="font-size:9px; color:#64748b;">外出: {{ getLabel('outgoing', row.outgoing) }}</div>
-                   <div style="font-size:9px; color:#64748b;">夜間: {{ getLabel('nightActivity', row.nightActivity) }}</div>
+                   <div style="display:flex; flex-direction:column; gap:2px;">
+                      <span>夜間: {{ getLabel('nightActivity', row.nightActivity) }}</span>
+                      <span>活動: {{ getLabel('dailyActivity', row.dailyActivity) }}</span>
+                      <span>外出: {{ getLabel('outgoing', row.outgoing) }}</span>
+                      <span>陪伴: {{ getLabel('companionship', row.companionship) }}</span>
+                   </div>
                 </td>
+
                 <!-- Physical -->
                 <td style="padding:10px; text-align:center;">
                    <div style="display:flex; flex-direction:column; gap:2px;">
                       <span>排泄: {{ getLabel('excretionStatus', row.excretionStatus) }}</span>
                       <span>洗澡: {{ getLabel('bathing', row.bathing) }}</span>
-                      <span v-if="getLabel('safetyIncident', row.safetyIncident) !== '無'" style="color:#ef4444; font-weight:800;">警告: {{ getLabel('safetyIncident', row.safetyIncident) }}</span>
+                      <span v-if="getLabel('safetyIncident', row.safetyIncident) !== '無' && row.safetyIncident" style="color:#ef4444; font-weight:800;">警告: {{ getLabel('safetyIncident', row.safetyIncident) }}</span>
                    </div>
                 </td>
                 <!-- Description -->

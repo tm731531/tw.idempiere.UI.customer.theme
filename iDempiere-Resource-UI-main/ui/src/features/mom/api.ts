@@ -24,8 +24,8 @@ export interface MomData {
     safetyIncident?: string
 }
 
-function getIdentifier(val: any): string | undefined {
-    if (!val) return undefined
+function getIdentifier(val: any): string {
+    if (!val) return ''
     if (typeof val === 'object') {
         // Return .id (the code/value) if available, otherwise identifier, otherwise val
         return val.id ? String(val.id) : (val.identifier ? String(val.identifier) : String(val))
@@ -156,19 +156,19 @@ export interface MomPayload {
     DateDoc: string
     Name: string
     Description?: string
-    NightActivity?: string
-    BeforeSleepStatus?: string
-    LastNightSleep?: string
-    MorningMentalStatus?: string
-    Breakfast?: string
-    DailyActivity?: string
-    Lunch?: string
-    outgoing?: string
-    Dinner?: string
-    Companionship?: string
-    ExcretionStatus?: string
-    Bathing?: string
-    SafetyIncident?: string
+    NightActivity?: string | null
+    BeforeSleepStatus?: string | null
+    LastNightSleep?: string | null
+    MorningMentalStatus?: string | null
+    Breakfast?: string | null
+    DailyActivity?: string | null
+    Lunch?: string | null
+    outgoing?: string | null
+    Dinner?: string | null
+    Companionship?: string | null
+    ExcretionStatus?: string | null
+    Bathing?: string | null
+    SafetyIncident?: string | null
 }
 
 export async function createMomData(token: string, data: MomPayload): Promise<number> {
