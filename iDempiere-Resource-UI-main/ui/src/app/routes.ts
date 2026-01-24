@@ -11,6 +11,7 @@ import PaymentPage from './views/PaymentPage.vue'
 import ProductionPage from './views/ProductionPage.vue'
 import ReportPage from './views/ReportPage.vue'
 import RequestPage from './views/RequestPage.vue'
+import StockPage from './views/StockPage.vue'
 
 export const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/login' },
@@ -27,4 +28,5 @@ export const routes: RouteRecordRaw[] = [
   { path: '/production', component: ProductionPage },
   { path: '/report', component: ReportPage },
   { path: '/mom-report', component: MomReportPage },
+  { path: '/inventory', component: StockPage },
 ]

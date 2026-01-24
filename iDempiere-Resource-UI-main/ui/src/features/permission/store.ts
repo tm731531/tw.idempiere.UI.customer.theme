@@ -25,16 +25,16 @@ export function usePermission() {
   const isSystem = computed(() => userType.value === 'System')
 
   const visibleMenuItems = computed<MenuItem[]>(() => {
-    // 僅保留 'Mom 報表' (ID 'J')
-    const momOnly = MENU_ITEMS.filter(item => item.id === 'J')
+    // 僅保留 'Mom 報表' (ID 'J') 與 '耗材庫存' (ID 'K')
+    const momAndStock = MENU_ITEMS.filter(item => ['J', 'K'].includes(item.id))
 
     if (userType.value === 'System') {
-      // System 用戶僅看到 'Mom 報表'
-      return momOnly
+      // System 用戶可以看到這兩個核心功能
+      return momAndStock
     }
 
-    // User：僅看到 'Mom 報表'
-    return momOnly
+    // User：也能看到這兩個功能
+    return momAndStock
   })
 
   // 檢查選單是否可見

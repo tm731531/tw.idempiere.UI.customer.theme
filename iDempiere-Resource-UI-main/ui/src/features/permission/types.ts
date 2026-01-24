@@ -103,6 +103,13 @@ export const MENU_ITEMS: MenuItem[] = [
     path: '/mom-report',
     description: '檢視 Mom 系統每日健康報告與統計',
   },
+  {
+    id: 'K',
+    name: '耗材庫存',
+    tableName: 'M_Product',
+    path: '/inventory',
+    description: '監控失智照顧耗材與安全庫存',
+  },
 ]
 
 // System 專用選單
