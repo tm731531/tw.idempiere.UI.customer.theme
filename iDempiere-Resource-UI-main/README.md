@@ -1,142 +1,117 @@
-# iDempiere Resource UI - Docker Development Setup
+# iDempiere Resource UI
 
-A Vue.js application for managing iDempiere resources with Docker development environment.
+<p align="center">
+  <img src="https://img.shields.io/badge/Vue.js-3.5-4FC08D?logo=vue.js" alt="Vue.js 3" />
+  <img src="https://img.shields.io/badge/TypeScript-5.7-3178C6?logo=typescript" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/TailwindCSS-3-06B6D4?logo=tailwindcss" alt="TailwindCSS" />
+  <img src="https://img.shields.io/badge/iDempiere-REST%20API-007396" alt="iDempiere" />
+</p>
 
-## Quick Start
+一套為 **iDempiere ERP** 量身打造的現代化單頁應用程式 (SPA)，專注於 **照護管理** 與 **庫存監控** 兩大核心功能。
 
-### Docker Development
+---
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/your-org/iDempiere-Resource-UI.git
-   cd iDempiere-Resource-UI
-   ```
+## ✨ 核心功能
 
-2. **Start the development environment**
-   ```bash
-   docker-compose up
-   ```
+###  每日關懷記錄 (MOM Report)
 
-3. **Access the application**
-   - Development server: http://localhost:8888
+專為照護產業設計的每日記錄系統，完整追蹤被照護者的生活狀態。
 
-### Ubuntu Setup (Optional)
+| 功能 | 說明 |
+| :--- | :--- |
+| **晨昏狀態追蹤** | 記錄夜間活動、睡眠品質、晨間精神狀態 |
+| **飲食記錄** | 早餐、午餐、晚餐攝取情況 |
+| **活動與外出** | 日間活動、外出情況、陪伴狀態 |
+| **生理狀況** | 排泄狀態、沐浴情況、安全事故 |
+| **AI 智慧摘要** | 串接 Google Gemini API，自動產生照護報告摘要 |
+| **PDF 匯出** | 一鍵匯出精美 PDF 報告並附加至 iDempiere |
 
-If you prefer local development:
+---
+
+### � 即時庫存監控 (Stock Page)
+
+即時掌握物資庫存狀態，預防缺貨風險。
+
+| 功能 | 說明 |
+| :--- | :--- |
+| **分庫顯示** | 依倉庫別顯示各品項現有量 |
+| **安全水位警示** | 庫存低於設定水位時自動標記紅色警示 |
+| **7日平均消耗** | 自動計算近 7 天的日均消耗量 |
+| **智慧排序** | 缺貨品項自動置頂，優先處理 |
+
+---
+
+## 🚀 快速開始
+
+### 環境需求
+- **Node.js** 18+ 或 **Bun** 1.0+
+- 運行中的 **iDempiere** 伺服器 (含 REST API)
+
+### 安裝與啟動
 
 ```bash
-# Install Node.js
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-sudo apt-get install -y nodejs
-
-# Install dependencies and run
+# 進入 UI 目錄
 cd ui
-npm install
-npm run dev -- --host 0.0.0.0 --port 8888
+
+# 安裝依賴
+bun install   # 或 npm install
+
+# 啟動開發伺服器
+bun run dev   # 或 npm run dev
 ```
 
-## Docker Services
+開發伺服器會在 `http://localhost:5173` 啟動。
 
-### opencode-web
-- **Purpose**: Vue.js development server with hot reload
-- **Port**: 8888 (maps to container port 5173)
-- **Volume**: Live code reloading with `ui/` directory mounted
-- **Environment**: Development mode with hot module replacement
+---
 
-## Features
+## ⚙️ 環境設定
 
-- **Payment Management**: Complete CRUD with bank account integration
-- **Consultation Requests**: Customer relationship tracking
-- **Order Processing**: Sales order management
-- **Resource Booking**: Calendar-based scheduling
-- **User Management**: Role-based access control
-
-## Development
-
-### File Structure
-```
-├── docker-compose.yml      # Docker orchestration
-├── ui/                     # Vue.js application
-│   ├── Dockerfile.dev      # Development container
-│   ├── src/                # Source code
-│   ├── package.json        # Dependencies
-│   └── vite.config.ts      # Vite configuration
-└── README.md
-```
-
-### Docker Commands
-
-```bash
-# Start services
-docker-compose up
-
-# Start in background
-docker-compose up -d
-
-# View logs
-docker-compose logs -f opencode-web
-
-# Stop services
-docker-compose down
-
-# Rebuild and restart
-docker-compose up --build
-```
-
-## Configuration
-
-### Environment Variables
-
-Create `ui/.env` file:
+在 `ui/.env` 建立環境變數：
 
 ```env
 VITE_API_BASE_URL=http://your-idempiere-server:8080
-VITE_APP_TITLE=iDempiere Resource UI
 ```
 
-### API Endpoints
+### AI 摘要功能
 
-The application connects to iDempiere REST API:
+在 iDempiere 的 `AD_SysConfig` 表中新增：
 
-- `/api/v1/models/C_Payment` - Payment management
-- `/api/v1/models/R_Request` - Consultation requests
-- `/api/v1/models/C_Order` - Order management
-- `/api/v1/models/S_Resource` - Resource booking
+| Name            | Value                 |
+| :-------------- | :-------------------- |
+| `GEMINI_API_KEY` | `YOUR_GEMINI_API_KEY` |
 
-## Troubleshooting
+---
 
-### Common Issues
+## 🔗 API 整合
 
-1. **Port already in use**
-   ```bash
-   # Change port in docker-compose.yml
-   ports:
-     - "8889:5173"
-   ```
+| 端點 | 用途 |
+| :--- | :--- |
+| `GET /api/v1/models/Z_momSystem` | 每日關懷記錄 |
+| `GET /api/v1/models/M_Product` | 產品主檔 |
+| `GET /api/v1/models/M_StorageOnHand` | 即時庫存 |
+| `GET /api/v1/models/M_Transaction` | 庫存異動 (計算消耗) |
+| `GET /api/v1/models/M_AttributeSetInstance` | ASI 效期資料 (GuaranteeDate) |
+| `GET /api/v1/models/M_Replenish` | 安全水位設定 |
+| `GET /api/v1/reference/{id}` | 下拉選單項目 |
+| `POST /api/v1/models/{table}/{id}/attachments` | 上傳 PDF 附件 |
 
-2. **Permission denied**
-   ```bash
-   sudo chown -R $USER:$USER .
-   ```
+---
 
-3. **Container won't start**
-   ```bash
-   # Clear Docker cache
-   docker system prune -f
-   docker-compose build --no-cache
-   ```
+## 🧠 技術亮點
 
-## API Integration Notes
+- **Metadata-Driven UI**: 自動從 `AD_Column` 讀取中文欄位標籤
+- **Safe ID Extraction**: 統一處理 iDempiere 的 `{ id, identifier }` 回傳格式
+- **Consumption Analysis**: 僅計算 `I-` (領用) 和 `C-` (出貨) 作為消耗，排除盤盈與進貨
+- **Robust Date Parsing**: 處理多種日期格式 (`YYYY-MM-DD`, `MM/DD/YYYY`)
 
-The application expects iDempiere to be running on the configured API endpoint. Make sure your iDempiere server is accessible and the REST API is enabled.
+---
 
-## Contributing
+## 📄 License
 
-1. Make your changes in the `ui/` directory
-2. Test with `docker-compose up`
-3. Commit your changes
-4. Submit a pull request
+MIT License
 
-## License
+---
 
-MIT License - see LICENSE file for details.
+<p align="center">
+  <sub>Built with 💙 for caregivers and inventory managers</sub>
+</p>

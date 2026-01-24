@@ -31,8 +31,15 @@ const filteredStocks = computed(() => {
       s.productValue.toLowerCase().includes(searchQuery.value.toLowerCase())
     )
   }
-  // Sort: prioritize products with insufficient supply
+  // Sort: prioritize expired > expiring soon > below safety > others
   return [...result].sort((a, b) => {
+    // 1. Expired first
+    if (a.isExpired && !b.isExpired) return -1
+    if (!a.isExpired && b.isExpired) return 1
+    // 2. Expiring soon second
+    if (a.isExpiringSoon && !b.isExpiringSoon) return -1
+    if (!a.isExpiringSoon && b.isExpiringSoon) return 1
+    // 3. Below safety third
     if (a.isBelowSafety && !b.isBelowSafety) return -1
     if (!a.isBelowSafety && b.isBelowSafety) return 1
     return 0
@@ -76,13 +83,14 @@ onMounted(() => fetchStocks())
           <tr>
             <th class="px-6 py-4">商品名</th>
             <th class="px-6 py-4 text-center">分庫數量 (目前 / 最低)</th>
+            <th class="px-6 py-4 text-center">最近效期</th>
             <th class="px-6 py-4 text-center">日均消耗 (7日)</th>
             <th class="px-6 py-4 text-center">總計 / 總水位</th>
             <th class="px-6 py-4 text-center">狀態</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100">
-          <tr v-for="item in filteredStocks" :key="item.productId" class="hover:bg-slate-50 transition-colors" :class="{ 'bg-red-50/30': item.isBelowSafety }">
+          <tr v-for="item in filteredStocks" :key="item.productId" class="hover:bg-slate-50 transition-colors" :class="{ 'bg-red-50/30': item.isBelowSafety || item.isExpired, 'bg-orange-50/30': item.isExpiringSoon && !item.isExpired }">
             <td class="px-6 py-4">
               <div class="font-bold text-slate-800">{{ item.productName }}</div>
               <div class="text-[10px] text-slate-400 font-mono">{{ item.productValue }}</div>
@@ -98,6 +106,18 @@ onMounted(() => fetchStocks())
                   <span v-if="wh.safetyStock > 0" class="text-slate-400 font-normal ml-1">/ {{ wh.safetyStock }}</span>
                 </div>
               </div>
+            </td>
+            <td class="px-6 py-4 text-center">
+              <div v-if="item.nearestExpiryDate" class="flex flex-col items-center">
+                <span class="font-bold" :class="{
+                  'text-red-600 animate-pulse': item.isExpired,
+                  'text-orange-600': item.isExpiringSoon && !item.isExpired,
+                  'text-slate-700': !item.isExpired && !item.isExpiringSoon
+                }">{{ item.nearestExpiryDate }}</span>
+                <span v-if="item.isExpired" class="text-[9px] text-red-500 font-bold uppercase">已過期</span>
+                <span v-else-if="item.isExpiringSoon" class="text-[9px] text-orange-500 font-bold uppercase">即將過期</span>
+              </div>
+              <div v-else class="text-slate-300 italic text-xs">-</div>
             </td>
             <td class="px-6 py-4 text-center">
               <div v-if="item.avgConsumption7d > 0" class="flex flex-col items-center">

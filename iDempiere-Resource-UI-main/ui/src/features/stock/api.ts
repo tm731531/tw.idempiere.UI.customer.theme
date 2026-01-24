@@ -17,6 +17,10 @@ export interface ProductStock {
     totalSafetyStock: number
     isBelowSafety: boolean
     avgConsumption7d: number
+    // Expiry tracking
+    nearestExpiryDate?: string
+    isExpiringSoon: boolean  // Within 2 days
+    isExpired: boolean
 }
 
 export async function listProductStock(token: string): Promise<ProductStock[]> {
@@ -85,6 +89,42 @@ export async function listProductStock(token: string): Promise<ProductStock[]> {
         replenishRules.push(...(res.records || []))
     } catch (e) { console.warn('[Stock] Replenishment fetch failed') }
 
+    // 5. Fetch ASI (Attribute Set Instance) for Expiry Dates
+    const asiMap = new Map<number, Date>() // ASI ID -> GuaranteeDate
+    try {
+        // Get unique ASI IDs from storage
+        const asiIds = new Set<number>()
+        storage.forEach(s => {
+            const asiId = s.M_AttributeSetInstance_ID?.id || s.M_AttributeSetInstance_ID
+            if (asiId && asiId !== 0) asiIds.add(Number(asiId))
+        })
+
+        if (asiIds.size > 0) {
+            // Fetch ASI records with GuaranteeDate
+            const asiRes = await apiFetch<any>(`${API_V1}/models/M_AttributeSetInstance`, {
+                token,
+                searchParams: { $select: 'GuaranteeDate', $top: 2000 }
+            })
+            asiRes.records?.forEach((r: any) => {
+                const id = r.id || r.M_AttributeSetInstance_ID
+                const gDate = r.GuaranteeDate?.id || r.GuaranteeDate
+                if (id && gDate) {
+                    const dateStr = String(gDate)
+                    let parsedDate: Date
+                    if (dateStr.includes('-')) {
+                        parsedDate = new Date(dateStr.replace(' ', 'T'))
+                    } else {
+                        parsedDate = new Date(dateStr)
+                    }
+                    if (!isNaN(parsedDate.getTime())) {
+                        asiMap.set(Number(id), parsedDate)
+                    }
+                }
+            })
+            console.log(`[Stock] Fetched ${asiMap.size} ASI records with expiry dates.`)
+        }
+    } catch (e) { console.warn('[Stock] ASI fetch failed', e) }
+
     // 5. Fetch Transactions for 7-day average
     const sevenDaysAgo = new Date()
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
@@ -103,7 +143,7 @@ export async function listProductStock(token: string): Promise<ProductStock[]> {
             }
         })
         transactions.push(...(res.records || []))
-        console.log(`[Stock] Fetched ${res.records?.length || 0} recent transactions.`);
+        console.log(`[Stock] Fetched ${res.records?.length || 0} transactions. Reference Date (7d ago): ${sevenDaysAgo.toISOString()}`);
     } catch (e) { console.warn('[Stock] Consumption fetch failed', e) }
 
     // 6. Merge
@@ -133,20 +173,33 @@ export async function listProductStock(token: string): Promise<ProductStock[]> {
             // 1. Robust Date Parsing
             const rawDate = t.MovementDate?.id || t.MovementDate || ''
             const dateStrRaw = String(rawDate)
-            const dateOnly = dateStrRaw.includes('T') ? dateStrRaw.split('T')[0] : dateStrRaw.split(' ')[0]
 
-            if (!dateOnly || dateOnly < dateStr) return
+            let tDate: Date;
+            if (dateStrRaw.includes('-')) {
+                // Handle ISO YYYY-MM-DD or YYYY-MM-DD HH:mm:ss
+                tDate = new Date(dateStrRaw.replace(' ', 'T'));
+            } else {
+                // Handle other formats like MM/DD/YYYY
+                tDate = new Date(dateStrRaw);
+            }
+
+            if (isNaN(tDate.getTime())) return;
+            if (tDate < sevenDaysAgo) return;
+
+            const dateOnly = tDate.toISOString().split('T')[0];
 
             // 2. Net Consumption Calculation
             // We want to count actual usage. In iDempiere:
-            // I-, I+ = Inventory Use/Adjustment
-            // C-, C+ = Customer Shipments
-            // M-, M+ = Transfers (Exclude)
-            // V+, V- = Vendor Receipts (Exclude)
-            const mType = t.MovementType?.id || t.MovementType
-            if (['M-', 'M+', 'V+', 'V-'].includes(String(mType))) return
+            // I- = Inventory Use, C- = Customer Shipment
+            const mType = String(t.MovementType?.id || t.MovementType);
+            const qtyField = t.MovementQty?.id !== undefined ? t.MovementQty.id : t.MovementQty;
+            const qtyRaw = Number(qtyField || 0);
 
-            const qty = -(Number(t.MovementQty || 0))
+            // ONLY count standard consumption types: Inventory Use (I-) and Customer Shipments (C-)
+            if (!['I-', 'C-'].includes(mType)) return;
+            if (qtyRaw >= 0) return; // Consumption must be a decrease
+
+            const qty = -qtyRaw;
             dailyConsumptionMap.set(dateOnly, (dailyConsumptionMap.get(dateOnly) || 0) + qty)
         })
 
@@ -154,6 +207,10 @@ export async function listProductStock(token: string): Promise<ProductStock[]> {
         const totalConsumed = Array.from(dailyConsumptionMap.values()).reduce((sum, q) => sum + q, 0)
         // Average: total / actual days (but at most 7 or at least 1)
         const avgConsumption7d = daysWithData > 0 ? (totalConsumed / daysWithData) : 0
+
+        if (totalConsumed > 0) {
+            console.log(`[Calc] Product: ${p.Value}, Total: ${totalConsumed}, Days: ${daysWithData}, Avg: ${avgConsumption7d}`);
+        }
 
         const relevantWhIds = new Set(whSum.keys())
         replenishRules.forEach(r => {
@@ -182,6 +239,33 @@ export async function listProductStock(token: string): Promise<ProductStock[]> {
         const totalQty = warehouseStocks.reduce((sum, s) => sum + s.qtyOnHand, 0)
         const totalSafetyStock = warehouseStocks.reduce((sum, s) => sum + s.safetyStock, 0)
 
+        // Expiry calculation: find nearest expiry date for this product
+        const today = new Date()
+        today.setHours(0, 0, 0, 0)
+        const twoDaysFromNow = new Date(today)
+        twoDaysFromNow.setDate(twoDaysFromNow.getDate() + 2)
+
+        // Find nearest expiry from all storage records of this product
+        const expiryDates: Date[] = []
+        pStorage.forEach(s => {
+            const asiId = s.M_AttributeSetInstance_ID?.id || s.M_AttributeSetInstance_ID
+            if (asiId && asiMap.has(Number(asiId))) {
+                expiryDates.push(asiMap.get(Number(asiId))!)
+            }
+        })
+
+        let nearestExpiryDate: string | undefined = undefined
+        let isExpired = false
+        let isExpiringSoon = false
+
+        if (expiryDates.length > 0) {
+            expiryDates.sort((a, b) => a.getTime() - b.getTime())
+            const nearestExpiry = expiryDates[0]
+            nearestExpiryDate = nearestExpiry.toISOString().split('T')[0]
+            isExpired = nearestExpiry < today
+            isExpiringSoon = nearestExpiry >= today && nearestExpiry <= twoDaysFromNow
+        }
+
         return {
             productId: pId,
             productValue: p.Value,
@@ -190,7 +274,10 @@ export async function listProductStock(token: string): Promise<ProductStock[]> {
             totalQty,
             totalSafetyStock,
             isBelowSafety: (totalSafetyStock > 0) && (totalQty < totalSafetyStock),
-            avgConsumption7d
+            avgConsumption7d,
+            nearestExpiryDate,
+            isExpiringSoon,
+            isExpired
         }
     })
 
