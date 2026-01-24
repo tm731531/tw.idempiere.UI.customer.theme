@@ -27,7 +27,7 @@ export async function listProductStock(token: string): Promise<ProductStock[]> {
     try {
         const res = await apiFetch<any>(`${API_V1}/models/M_Product`, {
             token,
-            searchParams: { $select: 'Value,Name', $top: 500 }
+            searchParams: { $select: 'Value,Name', $top: 1000 }
         })
         products = res.records || []
     } catch (e) {
@@ -96,12 +96,14 @@ export async function listProductStock(token: string): Promise<ProductStock[]> {
         const res = await apiFetch<any>(`${API_V1}/models/M_Transaction`, {
             token,
             searchParams: {
-                $filter: `MovementDate ge '${dateStr}T00:00:00Z' and MovementQty lt 0`,
-                $select: 'M_Product_ID,MovementDate,MovementQty',
+                // Fetch more records without strict filters to ensure we don't miss recent data
+                $select: 'M_Product_ID,MovementDate,MovementQty,MovementType',
+                $orderby: 'MovementDate desc, Created desc',
                 $top: 2000
             }
         })
         transactions.push(...(res.records || []))
+        console.log(`[Stock] Fetched ${res.records?.length || 0} recent transactions.`);
     } catch (e) { console.warn('[Stock] Consumption fetch failed', e) }
 
     // 6. Merge
@@ -128,9 +130,24 @@ export async function listProductStock(token: string): Promise<ProductStock[]> {
         })
         const dailyConsumptionMap = new Map<string, number>()
         pTrans.forEach(t => {
-            const day = t.MovementDate.split('T')[0]
-            const qty = Math.abs(Number(t.MovementQty || 0))
-            dailyConsumptionMap.set(day, (dailyConsumptionMap.get(day) || 0) + qty)
+            // 1. Robust Date Parsing
+            const rawDate = t.MovementDate?.id || t.MovementDate || ''
+            const dateStrRaw = String(rawDate)
+            const dateOnly = dateStrRaw.includes('T') ? dateStrRaw.split('T')[0] : dateStrRaw.split(' ')[0]
+
+            if (!dateOnly || dateOnly < dateStr) return
+
+            // 2. Net Consumption Calculation
+            // We want to count actual usage. In iDempiere:
+            // I-, I+ = Inventory Use/Adjustment
+            // C-, C+ = Customer Shipments
+            // M-, M+ = Transfers (Exclude)
+            // V+, V- = Vendor Receipts (Exclude)
+            const mType = t.MovementType?.id || t.MovementType
+            if (['M-', 'M+', 'V+', 'V-'].includes(String(mType))) return
+
+            const qty = -(Number(t.MovementQty || 0))
+            dailyConsumptionMap.set(dateOnly, (dailyConsumptionMap.get(dateOnly) || 0) + qty)
         })
 
         const daysWithData = dailyConsumptionMap.size

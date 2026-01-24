@@ -24,11 +24,19 @@ const fetchStocks = async () => {
 }
 
 const filteredStocks = computed(() => {
-  if (!searchQuery.value) return stocks.value
-  return stocks.value.filter(s => 
-    s.productName.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-    s.productValue.toLowerCase().includes(searchQuery.value.toLowerCase())
-  )
+  let result = stocks.value
+  if (searchQuery.value) {
+    result = result.filter(s => 
+      s.productName.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
+      s.productValue.toLowerCase().includes(searchQuery.value.toLowerCase())
+    )
+  }
+  // Sort: prioritize products with insufficient supply
+  return [...result].sort((a, b) => {
+    if (a.isBelowSafety && !b.isBelowSafety) return -1
+    if (!a.isBelowSafety && b.isBelowSafety) return 1
+    return 0
+  })
 })
 
 onMounted(() => fetchStocks())
