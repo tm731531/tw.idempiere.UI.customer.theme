@@ -54,10 +54,13 @@ interface AiSummary {
     status: 'Stable' | 'Vigilant' | 'Observation' | 'Critical'
     content: string
   }>
-  recommendations: string[]
+  conclusion: string
+  type?: 'data' | 'medical'
 }
-const aiSummary = ref<AiSummary | null>(null)
+const aiDataSummary = ref<AiSummary | null>(null)
+const aiMedicalSummary = ref<AiSummary | null>(null)
 const aiGenerating = ref(false)
+const aiTarget = ref<'data' | 'medical'>('data')
 
 // Metadata State
 const options = ref<Record<string, { value: string, label: string }[]>>({})
@@ -693,7 +696,11 @@ function openEditModal(row: MomData) {
     showModal.value = true
 }
 
-function openAiModal() { modalMode.value = 'ai'; showModal.value = true }
+function openAiModal(type: 'data' | 'medical') {
+  aiTarget.value = type
+  modalMode.value = 'ai'
+  showModal.value = true
+}
 
 async function handleAiGenerate() {
   if (!auth.token.value) return
@@ -720,31 +727,66 @@ async function handleAiGenerate() {
              洗澡: ${getLabel('bathing', r.bathing)}, ${bp}, 備註: ${r.description || '無'}`
     }).join('\n')
 
-    const prompt = `你是一位專業的長期照護醫師。請根據以下照護紀錄，產出一份專業、結構化的健康摘要報告。
-報告語言為繁體中文（台灣）。
+    const isMedical = aiTarget.value === 'medical'
+    const prompt = isMedical 
+      ? `你是一位專業的長期照護臨床顧問。請根據以下照護紀錄，從「醫療與臨床觀點」產出一份結構化的分析報告，供主治醫師參考。
+報告語言：繁體中文（台灣）。
+
+**重要規範：**
+1. 站在醫療專業角度，分析數據背後可能的臨床意涵（如：睡眠障礙對情緒的影響、生理數值與日常表現的關聯）。
+2. 提供臨床觀察重點（如：建議醫師關注某項指標的變動）。
+3. 報告是提供給醫師看的，請保持專業、精確且中立。
 
 請務必以 JSON 格式回傳，結構如下：
 {
   "period": "YYYY/MM/DD - YYYY/MM/DD",
-  "overall_summary": "對這段期間健康狀況的總體專業評價",
+  "overall_summary": "對這段期間患者健康狀態的專業臨床評估總結",
   "sections": [
     {
-      "title": "區塊名稱 (例如：睡眠與休息、飲食狀況、情緒表現、生理維護)",
-      "status": "Stable (穩定) / Vigilant (警覺) / Observation (觀察) / Critical (危急)",
-      "content": "具體的專業分析內容，提及具體日期與數值（若有）"
+      "title": "臨床觀測分組 (例如：神經精神症狀分析、循環與代謝觀察、營養與體能評估)",
+      "status": "Stable / Vigilant / Observation / Critical",
+      "content": "深入的臨床觀察與數據交叉分析"
     }
   ],
-  "recommendations": ["具體的後續建議 1", "建議 2"]
-}
+  "conclusion": "給醫師的專業提示與臨床觀察建議結語"
+}`
+      : `你是一位專業的健康數據分析助理。請根據以下照護紀錄，產出一份「客觀數據量化分析」報告。
+報告對象：主治醫師。
+報告語言：繁體中文（台灣）。
 
-紀錄數據：
-${dataText}`
+**重要規範：**
+1. 僅針對現有紀錄進行客觀彙整、統計與現象描述（如：出現頻率、具體日期、數值波動、數據分布）。
+2. **絕對禁止**提供任何診斷建議、治療方案或病理判斷。
+3. 保持數據導向，清晰呈現各項指標的統計現況。
 
-    const responseText = await generateGeminiContent(apiKey, prompt)
+請務必以 JSON 格式回傳，結構如下：
+{
+  "period": "YYYY/MM/DD - YYYY/MM/DD",
+  "overall_summary": "對這段期間數據現象的客觀量化總結",
+  "sections": [
+    {
+      "title": "數據統計類別 (例如：睡眠時數統計、異常事件頻率、飲食攝取達成率)",
+      "status": "Stable / Vigilant / Observation / Critical",
+      "content": "具體的數據統計現象匯總，需提及具體次數與日期"
+    }
+  ],
+  "conclusion": "數據趨勢的客觀結語"
+}`;
+
+    const promptWithData = `${prompt}\n\n紀錄數據：\n${dataText}`
+
+    const responseText = await generateGeminiContent(apiKey, promptWithData)
 
     // 清理可能包含的 Markdown 標記 (如 ```json ... ```)
     const jsonStr = responseText.replace(/```json/g, '').replace(/```/g, '').trim()
-    aiSummary.value = JSON.parse(jsonStr)
+    const parsed = JSON.parse(jsonStr)
+
+    if (isMedical) {
+      aiMedicalSummary.value = { ...parsed, type: 'medical' }
+    }
+    else {
+      aiDataSummary.value = { ...parsed, type: 'data' }
+    }
 
     showModal.value = false
     successMessage.value = 'AI 摘要生成完畢！'
@@ -769,7 +811,7 @@ async function handleSave() {
             NightActivity: s(form.value.nightActivity), BeforeSleepStatus: s(form.value.beforeSleepStatus),
             LastNightSleep: s(form.value.lastNightSleep), MorningMentalStatus: s(form.value.morningMentalStatus),
             Breakfast: s(form.value.breakfast), DailyActivity: s(form.value.dailyActivity),
-            Lunch: s(form.value.lunch), outgoing: s(form.value.outgoing), Dinner: s(form.value.dinner),
+            Lunch: s(form.value.lunch), Outgoing: s(form.value.outgoing), Dinner: s(form.value.dinner),
             Companionship: s(form.value.companionship), ExcretionStatus: s(form.value.excretionStatus),
             Bathing: s(form.value.bathing), SafetyIncident: s(form.value.safetyIncident),
             // 生理數據 (PascalCase)
@@ -913,7 +955,8 @@ watch([dateFrom, dateTo], () => loadData())
         <div class="flex items-center gap-3">
           <input v-model="dateFrom" type="date" class="rounded border p-2 text-xs" />
           <input v-model="dateTo" type="date" class="rounded border p-2 text-xs" />
-          <button @click="openAiModal" class="rounded bg-purple-600 px-4 py-2 text-xs text-white font-bold">✨ AI 統整</button>
+          <button @click="openAiModal('data')" class="rounded bg-indigo-600 px-4 py-2 text-xs text-white font-bold transition-all hover:bg-indigo-700 shadow-sm">✨ 數據量化分析</button>
+          <button @click="openAiModal('medical')" class="rounded bg-rose-600 px-4 py-2 text-xs text-white font-bold transition-all hover:bg-rose-700 shadow-sm">✨ 醫療專業彙整</button>
           <button @click="openCreateModal" class="rounded bg-emerald-600 px-4 py-2 text-xs text-white font-bold">➕ 新增</button>
           <button @click="exportAndAttach" :disabled="exporting || records.length === 0" class="rounded bg-blue-600 px-6 py-2 text-xs text-white font-bold">
             {{ exporting ? '處理中...' : '產出 PDF' }}</button>
@@ -936,50 +979,63 @@ watch([dateFrom, dateTo], () => loadData())
         <div style="font-size:12px; color:#64748b; margin-top:5px;">週期：{{ dateFrom }} ~ {{ dateTo }} | 生成日期：{{ new Date().toLocaleDateString() }}</div>
       </div>
 
-      <!-- AI Result (Structured) -->
-      <div v-if="aiSummary" style="margin-bottom:30px; border:1px solid #e2e8f0; border-radius:12px; background:#fff; overflow:hidden; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); page-break-inside: avoid;">
-        <div style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%); padding:15px 25px; color:#fff; display:flex; justify-content:space-between; align-items:center;">
-          <div style="display:flex; align-items:center; gap:10px;">
-            <span style="font-size:20px;">🩺</span>
-            <span style="font-weight:800; font-size:16px; letter-spacing:0.05em;">AI 臨床健康摘要報告</span>
-          </div>
-          <span style="font-size:12px; opacity:0.9; font-weight:600;">分析週期：{{ aiSummary.period }}</span>
-        </div>
+      <!-- AI Results (Two Columns if both generated) -->
+      <div v-if="aiDataSummary || aiMedicalSummary" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap:20px; margin-bottom:30px;">
         
-        <div style="padding:25px;">
-          <!-- Overall Summary -->
-          <div style="margin-bottom:25px; border-left:4px solid #6366f1; padding-left:20px;">
-            <h4 style="margin:0 0 10px 0; font-size:14px; color:#6366f1; font-weight:800; text-transform:uppercase;">綜合臨床分析</h4>
-            <p style="margin:0; font-size:15px; color:#1e293b; line-height:1.7; font-weight:500;">{{ aiSummary.overall_summary }}</p>
+        <!-- Data Analysis Card -->
+        <div v-if="aiDataSummary" style="border:1px solid #e2e8f0; border-radius:12px; background:#fff; overflow:hidden; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); page-break-inside: avoid;">
+          <div style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); padding:12px 20px; color:#fff; display:flex; justify-content:space-between; align-items:center;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:18px;">📊</span>
+              <span style="font-weight:800; font-size:14px; letter-spacing:0.02em;">健康數據量化分析</span>
+            </div>
+            <span style="font-size:10px; opacity:0.8; font-weight:600;">{{ aiDataSummary.period }}</span>
           </div>
-
-          <!-- Grid Sections -->
-          <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:20px; margin-bottom:25px;">
-            <div v-for="(section, sIdx) in aiSummary.sections" :key="sIdx" 
-                 style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:15px;">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                <h5 style="margin:0; font-size:14px; font-weight:800; color:#334155;">{{ section.title }}</h5>
-                <span :style="{
-                  fontSize: '10px',
-                  fontWeight: '800',
-                  padding: '2px 8px',
-                  borderRadius: '12px',
-                  color: '#fff',
-                  background: section.status === 'Stable' ? '#10b981' : (section.status === 'Vigilant' ? '#f59e0b' : (section.status === 'Critical' ? '#ef4444' : '#6366f1'))
-                }">{{ section.status }}</span>
+          <div style="padding:15px;">
+            <p style="margin:0 0 15px 0; font-size:13px; color:#1e293b; line-height:1.6; font-weight:500; border-left:3px solid #6366f1; padding-left:12px;">{{ aiDataSummary.overall_summary }}</p>
+            <div style="display:grid; gap:12px; margin-bottom:15px;">
+              <div v-for="(section, sIdx) in aiDataSummary.sections" :key="sIdx" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <h5 style="margin:0; font-size:12px; font-weight:800; color:#334155;">{{ section.title }}</h5>
+                  <span :style="{ fontSize: '9px', fontWeight: '800', padding: '1px 6px', borderRadius: '10px', color: '#fff', background: section.status === 'Stable' ? '#10b981' : (section.status === 'Vigilant' ? '#f59e0b' : (section.status === 'Critical' ? '#ef4444' : '#6366f1')) }">{{ section.status }}</span>
+                </div>
+                <p style="margin:0; font-size:11px; color:#475569; line-height:1.5;">{{ section.content }}</p>
               </div>
-              <p style="margin:0; font-size:12px; color:#475569; line-height:1.6;">{{ section.content }}</p>
+            </div>
+            <div style="background:#f1f5f9; border-radius:8px; padding:12px;">
+              <h4 style="margin:0 0 6px 0; font-size:12px; color:#475569; font-weight:800;">📝 觀測結語</h4>
+              <p style="margin:0; font-size:11px; color:#1e293b; line-height:1.4;">{{ aiDataSummary.conclusion }}</p>
             </div>
           </div>
+        </div>
 
-          <!-- Recommendations -->
-          <div style="background:#f0fdf4; border:1px solid #bcf0da; border-radius:10px; padding:20px;">
-            <h4 style="margin:0 0 12px 0; font-size:14px; color:#16a34a; font-weight:800;">🏥 臨床追蹤建議</h4>
-            <ul style="margin:0; padding-left:20px; font-size:13px; color:#065f46; display:grid; gap:8px;">
-              <li v-for="(rec, rIdx) in aiSummary.recommendations" :key="rIdx" style="line-height:1.5;">{{ rec }}</li>
-            </ul>
+        <!-- Medical Perspective Card -->
+        <div v-if="aiMedicalSummary" style="border:1px solid #fecaca; border-radius:12px; background:#fff; overflow:hidden; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); page-break-inside: avoid;">
+          <div style="background: linear-gradient(135deg, #e11d48 0%, #fb7185 100%); padding:12px 20px; color:#fff; display:flex; justify-content:space-between; align-items:center;">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:18px;">🩺</span>
+              <span style="font-weight:800; font-size:14px; letter-spacing:0.02em;">專業臨床觀點彙整</span>
+            </div>
+            <span style="font-size:10px; opacity:0.8; font-weight:600;">{{ aiMedicalSummary.period }}</span>
+          </div>
+          <div style="padding:15px;">
+            <p style="margin:0 0 15px 0; font-size:13px; color:#1e293b; line-height:1.6; font-weight:500; border-left:3px solid #e11d48; padding-left:12px;">{{ aiMedicalSummary.overall_summary }}</p>
+            <div style="display:grid; gap:12px; margin-bottom:15px;">
+              <div v-for="(section, sIdx) in aiMedicalSummary.sections" :key="sIdx" style="background:#fff1f2; border:1px solid #fecaca; border-radius:8px; padding:10px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                  <h5 style="margin:0; font-size:12px; font-weight:800; color:#9f1239;">{{ section.title }}</h5>
+                  <span :style="{ fontSize: '9px', fontWeight: '800', padding: '1px 6px', borderRadius: '10px', color: '#fff', background: section.status === 'Stable' ? '#10b981' : (section.status === 'Vigilant' ? '#f59e0b' : (section.status === 'Critical' ? '#e11d48' : '#fb7185')) }">{{ section.status }}</span>
+                </div>
+                <p style="margin:0; font-size:11px; color:#be123c; line-height:1.5;">{{ section.content }}</p>
+              </div>
+            </div>
+            <div style="background:#fff5f5; border-radius:8px; padding:12px; border:1px dashed #fecaca;">
+              <h4 style="margin:0 0 6px 0; font-size:12px; color:#9f1239; font-weight:800;">🏥 臨床追蹤與提示</h4>
+              <p style="margin:0; font-size:11px; color:#881337; line-height:1.4;">{{ aiMedicalSummary.conclusion }}</p>
+            </div>
           </div>
         </div>
+
       </div>
 
       <!-- Analysis Section -->
@@ -1298,10 +1354,10 @@ watch([dateFrom, dateTo], () => loadData())
         
         <!-- AI Prompt -->
         <div v-if="modalMode === 'ai'">
-          <h2 class="text-xl font-bold mb-4">✨ AI 健康紀錄統整</h2>
-          <p class="text-sm text-slate-500 mb-6 font-bold">系統將自動分析當前篩選週期內的 <b>{{ records.length }}</b> 筆紀錄並產生摘要。</p>
-          <button @click="handleAiGenerate" :disabled="aiGenerating" class="w-full rounded-xl bg-purple-600 py-3 text-white font-bold hover:bg-purple-700 transition-colors shadow-lg shadow-purple-200">
-            {{ aiGenerating ? 'AI 正在思考中...' : '開始統整' }}</button>
+          <h2 class="text-xl font-bold mb-4">✨ AI {{ aiTarget === 'data' ? '數據量化分析' : '醫療分析' }}統整</h2>
+          <p class="text-sm text-slate-500 mb-6 font-bold">系統將分析現有 <b>{{ records.length }}</b> 筆紀錄。{{ aiTarget === 'medical' ? '本報告提供臨床觀察點，供醫師診斷參考。' : '本報告僅做客觀數據彙整。' }}</p>
+          <button @click="handleAiGenerate" :disabled="aiGenerating" class="w-full rounded-xl py-3 text-white font-bold transition-all shadow-lg" :class="aiTarget === 'data' ? 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200' : 'bg-rose-600 hover:bg-rose-700 shadow-rose-200'">
+            {{ aiGenerating ? 'AI 正在分析數據中...' : '開始統整' }}</button>
         </div>
 
         <!-- Data Entry -->

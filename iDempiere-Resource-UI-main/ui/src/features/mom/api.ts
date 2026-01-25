@@ -49,7 +49,7 @@ export async function listMomData(
     pagination?: { top?: number; skip?: number }
 ): Promise<{ records: MomData[]; totalCount?: number }> {
     const searchParams: Record<string, string | number | boolean> = {
-        $select: 'Z_momSystem_ID,DateDoc,Name,Description,NightActivity,BeforeSleepStatus,LastNightSleep,MorningMentalStatus,Breakfast,DailyActivity,Lunch,outgoing,Dinner,Companionship,ExcretionStatus,Bathing,SafetyIncident,DocStatus,Processed,SystolicBP,DiastolicBP,Pulse,BPNote',
+        $select: 'Z_momSystem_ID,DateDoc,Name,Description,NightActivity,BeforeSleepStatus,LastNightSleep,MorningMentalStatus,Breakfast,DailyActivity,Lunch,Outgoing,Dinner,Companionship,ExcretionStatus,Bathing,SafetyIncident,DocStatus,Processed,SystolicBP,DiastolicBP,Pulse,BPNote',
         $orderby: 'DateDoc desc',
     }
 
@@ -85,7 +85,7 @@ export async function listMomData(
         breakfast: getIdentifier(r.Breakfast),
         dailyActivity: getIdentifier(r.DailyActivity),
         lunch: getIdentifier(r.Lunch),
-        outgoing: getIdentifier(r.outgoing),
+        outgoing: getIdentifier(r.Outgoing),
         dinner: getIdentifier(r.Dinner),
         companionship: getIdentifier(r.Companionship),
         excretionStatus: getIdentifier(r.ExcretionStatus),
@@ -276,7 +276,7 @@ export interface MomPayload {
     Breakfast?: string | null
     DailyActivity?: string | null
     Lunch?: string | null
-    outgoing?: string | null
+    Outgoing?: string | null
     Dinner?: string | null
     Companionship?: string | null
     ExcretionStatus?: string | null
