@@ -24,6 +24,11 @@ export interface MomData {
     safetyIncident?: string
     docStatus?: string
     isProcessed?: boolean
+    // 生理數據欄位 (等用戶在 iDempiere 新增後啟用)
+    systolicBP?: number    // 收縮壓
+    diastolicBP?: number   // 舒張壓
+    pulse?: number         // 脈搏/心率
+    bpNote?: string        // 測量備註
 }
 
 function getIdentifier(val: any): string {
@@ -44,7 +49,7 @@ export async function listMomData(
     pagination?: { top?: number; skip?: number }
 ): Promise<{ records: MomData[]; totalCount?: number }> {
     const searchParams: Record<string, string | number | boolean> = {
-        $select: 'Z_momSystem_ID,DateDoc,Name,Description,NightActivity,BeforeSleepStatus,LastNightSleep,MorningMentalStatus,Breakfast,DailyActivity,Lunch,outgoing,Dinner,Companionship,ExcretionStatus,Bathing,SafetyIncident,DocStatus,Processed',
+        $select: 'Z_momSystem_ID,DateDoc,Name,Description,NightActivity,BeforeSleepStatus,LastNightSleep,MorningMentalStatus,Breakfast,DailyActivity,Lunch,outgoing,Dinner,Companionship,ExcretionStatus,Bathing,SafetyIncident,DocStatus,Processed,SystolicBP,DiastolicBP,Pulse,BPNote',
         $orderby: 'DateDoc desc',
     }
 
@@ -87,7 +92,12 @@ export async function listMomData(
         bathing: getIdentifier(r.Bathing),
         safetyIncident: getIdentifier(r.SafetyIncident),
         docStatus: getIdentifier(r.DocStatus),
-        isProcessed: r.Processed === 'Y' || r.Processed === true
+        isProcessed: r.Processed === 'Y' || r.Processed === true,
+        // 生理數據 (PascalCase)
+        systolicBP: r.SystolicBP ? Number(r.SystolicBP) : undefined,
+        diastolicBP: r.DiastolicBP ? Number(r.DiastolicBP) : undefined,
+        pulse: r.Pulse ? Number(r.Pulse) : undefined,
+        bpNote: r.BPNote ? String(r.BPNote) : undefined
     }))
 
     return {
@@ -153,6 +163,105 @@ export async function uploadMomAttachment(
 }
 
 /**
+ * Attachment data structure
+ */
+export interface MomAttachment {
+    name: string
+    contentType?: string
+    data?: string  // Base64 data (when fetching)
+}
+
+/**
+ * Fetch attachments for a Mom record.
+ * Returns list of attachment metadata (name, type).
+ */
+export async function getMomAttachments(
+    token: string,
+    recordId: number
+): Promise<MomAttachment[]> {
+    try {
+        const url = `${API_V1}/models/Z_momSystem/${recordId}/attachments`;
+        const res = await ky.get(url, {
+            headers: { Authorization: `Bearer ${token}` }
+        }).json<{ attachments?: { name: string, contentType?: string }[] }>();
+
+        return (res.attachments || []).map(a => ({
+            name: a.name,
+            contentType: a.contentType
+        }));
+    } catch (e) {
+        console.error('Failed to fetch attachments:', e);
+        return [];
+    }
+}
+
+/**
+ * Fetch a single attachment's data (Base64).
+ */
+export async function getMomAttachmentData(
+    token: string,
+    recordId: number,
+    filename: string
+): Promise<string | null> {
+    try {
+        const url = `${API_V1}/models/Z_momSystem/${recordId}/attachments/${encodeURIComponent(filename)}`;
+        const res = await ky.get(url, {
+            headers: { Authorization: `Bearer ${token}` }
+        }).json<{ data?: string }>();
+
+        return res.data || null;
+    } catch (e) {
+        console.error('Failed to fetch attachment data:', e);
+        return null;
+    }
+}
+
+/**
+ * Upload a photo attachment to a Mom record.
+ * Uses same pattern as PDF upload, but with image content type.
+ */
+export async function uploadMomPhoto(
+    token: string,
+    recordId: number,
+    file: File
+): Promise<void> {
+    // 1. Convert File to Base64
+    const reader = new FileReader();
+    const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onload = () => {
+            const result = reader.result as string;
+            const base64 = result.split(',')[1];
+            resolve(base64);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+
+    const base64Data = await base64Promise;
+
+    // 2. Generate filename with timestamp
+    const ext = file.name.split('.').pop() || 'jpg';
+    const now = new Date();
+    const timestamp = now.getFullYear().toString() +
+        (now.getMonth() + 1).toString().padStart(2, '0') +
+        now.getDate().toString().padStart(2, '0') +
+        now.getHours().toString().padStart(2, '0') +
+        now.getMinutes().toString().padStart(2, '0') +
+        now.getSeconds().toString().padStart(2, '0');
+    const filename = `Photo_${timestamp}.${ext}`;
+
+    // 3. Upload
+    const url = `${API_V1}/models/Z_momSystem/${recordId}/attachments`;
+    await ky.post(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        json: {
+            name: filename,
+            data: base64Data
+        }
+    });
+}
+
+/**
  * Payload for creating/updating Mom data
  * We map the camelCase frontend properties to the PascalCase/Specific column names of the backend.
  */
@@ -173,6 +282,11 @@ export interface MomPayload {
     ExcretionStatus?: string | null
     Bathing?: string | null
     SafetyIncident?: string | null
+    // 生理數據 (PascalCase)
+    SystolicBP?: number | null
+    DiastolicBP?: number | null
+    Pulse?: number | null
+    BPNote?: string | null
 }
 
 export async function createMomData(token: string, data: MomPayload): Promise<number> {
@@ -232,6 +346,20 @@ export async function runMomCompleteProcess(token: string, recordId: number, tab
             "record-id": recordId
         }
     });
+}
+
+export async function getTableColumns(token: string, tableName: string): Promise<any[]> {
+    const tableRes = await apiFetch<{ records: { id: number }[] }>(`${API_V1}/models/AD_Table`, {
+        token,
+        searchParams: { $filter: `TableName eq '${tableName}'`, $select: 'AD_Table_ID' }
+    });
+    if (!tableRes.records || tableRes.records.length === 0) return [];
+    const tableId = tableRes.records[0].id;
+    const colRes = await apiFetch<{ records: any[] }>(`${API_V1}/models/AD_Column`, {
+        token,
+        searchParams: { $filter: `AD_Table_ID eq ${tableId}`, $select: 'ColumnName,Name' }
+    });
+    return colRes.records || [];
 }
 
 /**
