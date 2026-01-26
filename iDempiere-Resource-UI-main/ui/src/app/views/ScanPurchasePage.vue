@@ -39,6 +39,7 @@ const scanning = ref(false)
 const scannerReady = ref(false)
 const cameraError = ref('')
 let html5QrCode: Html5Qrcode | null = null
+const quickScan = ref(false) // 連續掃描模式
 
 // 手動輸入
 const manualProductCode = ref('')
@@ -64,6 +65,38 @@ const canSubmit = computed(() =>
   selectedWarehouseId.value !== null &&
   purchaseItems.value.length > 0
 )
+
+// 音效回饋
+function playScanSound() {
+  try {
+    const AudioContext = window.AudioContext || (window as any).webkitAudioContext
+    if (!AudioContext) return
+    
+    const ctx = new AudioContext()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    
+    osc.type = 'sine'
+    osc.frequency.value = 880 // A5
+    gain.gain.setValueAtTime(0.1, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.1)
+    
+    osc.start()
+    osc.stop(ctx.currentTime + 0.1)
+  } catch (e) {
+    console.warn('Audio play failed', e)
+  }
+}
+
+// 震動回饋
+function triggerHaptic() {
+  if (navigator.vibrate) {
+    navigator.vibrate(50)
+  }
+}
 
 // 取得 token (確保非 null)
 function getToken(): string {
@@ -154,12 +187,21 @@ async function stopScanner() {
 
 // 掃描成功
 async function onScanSuccess(decodedText: string) {
-  // 暫停掃描避免重複
-  await stopScanner()
+  // 果不是連續掃描，先暫停
+  if (!quickScan.value) {
+    await stopScanner()
+  }
+
+  // 避免連續掃描觸發太快 (簡易防抖)
+  if (loading.value) return 
+
+  playScanSound()
+  triggerHaptic()
 
   const parsed = parseQRCode(decodedText)
   if (!parsed) {
-    error.value = '無效的 QR Code 格式'
+    // 只有在非連續模式下才顯示錯誤避免干擾
+    if (!quickScan.value) error.value = '無效的 QR Code 格式'
     return
   }
 
@@ -182,23 +224,41 @@ async function lookupProduct(productValue: string) {
     const token = getToken()
     const product = await getProductByValue(token, productValue)
     if (!product) {
-      error.value = `找不到產品: ${productValue}`
+      if (!quickScan.value) error.value = `找不到產品: ${productValue}`
       return
     }
 
     const uomName = await getUOMName(token, product.uomId)
-
-    scannedProduct.value = {
+    const productData = {
       id: product.id,
       value: product.value,
       name: product.name,
       uomName
     }
-    itemQty.value = 1
-    itemPrice.value = 1
-    showAddItemModal.value = true
+
+    if (quickScan.value) {
+      // 連續模式：直接加入
+      purchaseItems.value.push({
+        productId: productData.id,
+        productValue: productData.value,
+        productName: productData.name,
+        uomId: 0,
+        uomName: productData.uomName,
+        qty: 1, // 預設 1
+        price: 1 // 預設 1
+      })
+      saveDraft()
+      // 成功提示 (用 toast 更好，這裡暫用 console 或不打擾)
+    } else {
+      // 一般模式：開啟彈窗
+      scannedProduct.value = productData
+      itemQty.value = 1
+      itemPrice.value = 1
+      showAddItemModal.value = true
+    }
+
   } catch (e: any) {
-    error.value = e.message || '查詢產品失敗'
+    if (!quickScan.value) error.value = e.message || '查詢產品失敗'
   } finally {
     loading.value = false
   }
@@ -332,317 +392,359 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-50 p-4">
-    <!-- 標題 -->
-    <div class="mb-4">
-      <h1 class="text-xl font-bold text-slate-800">掃描採購</h1>
-      <p class="text-sm text-slate-500">掃描產品 QR Code 快速建立採購單</p>
-    </div>
-
-    <!-- 錯誤訊息 -->
-    <div v-if="error" class="mb-4 p-3 bg-red-100 text-red-700 rounded-lg text-sm">
-      {{ error }}
-      <button @click="error = ''" class="ml-2 text-red-500 hover:underline">關閉</button>
-    </div>
-
-    <!-- 供應商與倉庫 -->
-    <div class="bg-white rounded-lg shadow p-4 mb-4">
-      <!-- 供應商 -->
-      <div class="mb-3">
-        <label class="block text-sm font-medium text-slate-700 mb-1">
-          供應商 <span class="text-red-500">*</span>
-        </label>
-        <div class="flex gap-2">
-          <select
-            v-model="selectedVendorId"
-            class="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option :value="null">請選擇供應商</option>
-            <option v-for="v in vendors" :key="v.id" :value="v.id">{{ v.name }}</option>
-          </select>
-          <button
-            @click="showAddVendor = true"
-            class="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 text-sm whitespace-nowrap"
-          >
-            + 新增
-          </button>
-        </div>
-      </div>
-
-      <!-- 倉庫 -->
-      <div class="mb-3">
-        <label class="block text-sm font-medium text-slate-700 mb-1">入庫倉庫</label>
-        <select
-          v-model="selectedWarehouseId"
-          class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          <option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.name }}</option>
-        </select>
-      </div>
-
-      <!-- 採購日期 -->
+  <div class="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 pb-32">
+    <!-- Sticky Header -->
+    <div class="sticky top-0 z-30 bg-white/80 backdrop-blur-md border-b border-slate-200/50 shadow-sm px-4 py-3 flex justify-between items-center">
       <div>
-        <label class="block text-sm font-medium text-slate-700 mb-1">採購日期</label>
-        <input
-          v-model="orderDate"
-          type="date"
-          class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-        />
+        <h1 class="text-lg font-bold text-slate-800 tracking-tight">掃描採購</h1>
+        <p class="text-xs text-slate-500 font-medium">iDempiere Mobile</p>
+      </div>
+      <div v-if="vendors.length > 0" class="flex items-center gap-2">
+         <!-- 這裡可以放 User Avatar 或設定按鈕 -->
       </div>
     </div>
 
-    <!-- 掃描區域 -->
-    <div class="bg-white rounded-lg shadow p-4 mb-4">
-      <div v-if="!scanning" class="text-center">
-        <button
-          @click="startScanner"
-          class="w-full py-4 bg-blue-500 text-white font-bold rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2"
-        >
-          <span class="text-2xl">📷</span>
-          點擊開始掃描
-        </button>
-      </div>
+    <div class="p-4 space-y-4 max-w-lg mx-auto">
+      <!-- 錯誤訊息 -->
+      <transition 
+        enter-active-class="transition duration-300 ease-out" 
+        enter-from-class="transform -translate-y-2 opacity-0" 
+        enter-to-class="transform translate-y-0 opacity-100"
+        leave-active-class="transition duration-200 ease-in" 
+        leave-from-class="opacity-100" 
+        leave-to-class="opacity-0"
+      >
+        <div v-if="error" class="p-4 bg-red-50 border border-red-100 text-red-700 rounded-xl shadow-sm text-sm flex justify-between items-start">
+          <div class="flex gap-2">
+            <span>⚠️</span>
+            <span>{{ error }}</span>
+          </div>
+          <button @click="error = ''" class="text-red-400 hover:text-red-700">✕</button>
+        </div>
+      </transition>
 
-      <div v-else>
-        <div id="qr-reader" class="w-full rounded-lg overflow-hidden"></div>
-        <button
-          @click="stopScanner"
-          class="w-full mt-2 py-2 bg-slate-200 text-slate-700 rounded-lg hover:bg-slate-300"
-        >
-          停止掃描
-        </button>
-      </div>
+      <!-- 設定區塊 (Card) -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-100 p-5 space-y-4">
+        <!-- 供應商 -->
+        <div>
+          <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 pl-1">
+            供應商 <span class="text-red-500">*</span>
+          </label>
+          <div class="flex gap-2">
+            <div class="relative flex-1">
+              <select
+                v-model="selectedVendorId"
+                class="w-full appearance-none bg-slate-50 border border-slate-200 text-slate-700 rounded-xl px-4 py-3 pr-8 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors text-sm font-medium"
+              >
+                <option :value="null">請選擇供應商</option>
+                <option v-for="v in vendors" :key="v.id" :value="v.id">{{ v.name }}</option>
+              </select>
+              <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-500">
+                <svg class="h-4 w-4 fill-current" viewBox="0 0 20 20"><path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"/></svg>
+              </div>
+            </div>
+            <button
+              @click="showAddVendor = true"
+              class="px-4 bg-emerald-50 text-emerald-600 rounded-xl hover:bg-emerald-100 font-medium transition-colors"
+            >
+              +
+            </button>
+          </div>
+        </div>
 
-      <!-- 相機錯誤 -->
-      <div v-if="cameraError" class="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm">
-        <div class="font-medium text-amber-800 mb-1">📷 需要相機權限</div>
-        <p class="text-amber-700 text-xs">{{ cameraError }}</p>
-        <p class="text-amber-600 text-xs mt-1">請在瀏覽器設定中允許相機存取，或使用下方手動輸入。</p>
-      </div>
+        <div class="grid grid-cols-2 gap-4">
+          <!-- 倉庫 -->
+          <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 pl-1">入庫倉庫</label>
+            <div class="relative">
+              <select
+                v-model="selectedWarehouseId"
+                class="w-full appearance-none bg-slate-50 border border-slate-200 text-slate-700 rounded-xl px-3 py-2.5 pr-8 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors text-sm"
+              >
+                <option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.name }}</option>
+              </select>
+              <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                <svg class="h-3 w-3 fill-current" viewBox="0 0 20 20"><path d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"/></svg>
+              </div>
+            </div>
+          </div>
 
-      <!-- 手動輸入 -->
-      <div class="mt-3 pt-3 border-t border-slate-100">
-        <div class="text-xs text-slate-400 text-center mb-2">或手動輸入</div>
-        <div class="flex gap-2">
-          <input
-            v-model="manualProductCode"
-            type="text"
-            placeholder="產品編碼"
-            class="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            @keyup.enter="handleManualInput"
-          />
-          <button
-            @click="handleManualInput"
-            :disabled="!manualProductCode.trim()"
-            class="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 disabled:opacity-50"
-          >
-            +
-          </button>
+          <!-- 日期 -->
+          <div>
+            <label class="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5 pl-1">採購日期</label>
+            <input
+              v-model="orderDate"
+              type="date"
+              class="w-full bg-slate-50 border border-slate-200 text-slate-700 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:bg-white transition-colors text-sm"
+            />
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- 採購清單 -->
-    <div class="bg-white rounded-lg shadow mb-4">
-      <div class="flex items-center justify-between p-3 border-b border-slate-100">
-        <span class="font-medium text-slate-800">📋 採購清單 ({{ purchaseItems.length }} 項)</span>
-        <button
-          v-if="purchaseItems.length > 0"
-          @click="clearList"
-          class="text-xs text-red-500 hover:underline"
-        >
-          清空
-        </button>
-      </div>
+      <!-- 掃描區域 -->
+      <div class="bg-white rounded-2xl shadow-lg shadow-slate-200/50 overflow-hidden border border-slate-100">
+        <!-- 未掃描狀態 -->
+        <div v-if="!scanning" class="p-8 text-center bg-slate-50/50">
+          <div class="w-20 h-20 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-4 text-4xl shadow-inner">
+            📷
+          </div>
+          <h3 class="text-slate-800 font-bold text-lg mb-1">準備掃描</h3>
+          <p class="text-slate-500 text-sm mb-6">點擊下方按鈕啟動相機<br>支援 QR Code 與條碼</p>
+          <button
+            @click="startScanner"
+            class="w-full py-3.5 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 active:scale-95 transition-all flex items-center justify-center gap-2"
+          >
+            開始掃描
+          </button>
+        </div>
 
-      <div v-if="purchaseItems.length === 0" class="p-8 text-center text-slate-400">
-        尚無商品，請開始掃描
-      </div>
+        <!-- 掃描中狀態 -->
+        <div v-else class="relative bg-black">
+          <div id="qr-reader" class="w-full"></div>
+          
+          <!-- 掃描框 Overlay -->
+          <div class="absolute inset-0 pointer-events-none border-[30px] border-black/50 flex items-center justify-center">
+             <div class="w-64 h-64 border-2 border-white/80 rounded-lg relative">
+               <div class="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-emerald-400 -mt-1 -ml-1"></div>
+               <div class="absolute top-0 right-0 w-4 h-4 border-t-4 border-r-4 border-emerald-400 -mt-1 -mr-1"></div>
+               <div class="absolute bottom-0 left-0 w-4 h-4 border-b-4 border-l-4 border-emerald-400 -mb-1 -ml-1"></div>
+               <div class="absolute bottom-0 right-0 w-4 h-4 border-b-4 border-r-4 border-emerald-400 -mb-1 -mr-1"></div>
+             </div>
+          </div>
+          
+          <!-- 控制列 -->
+          <div class="absolute bottom-0 inset-x-0 bg-black/60 backdrop-blur-sm p-4 flex items-center justify-between">
+            <button 
+              @click="stopScanner" 
+              class="text-white/90 hover:text-white text-sm bg-white/20 px-4 py-2 rounded-lg backdrop-blur-md"
+            >
+              關閉
+            </button>
+            
+            <!-- Quick Scan Toggle -->
+            <label class="flex items-center gap-2 cursor-pointer">
+              <span class="text-white text-sm font-medium">連續掃描</span>
+              <div class="relative">
+                <input type="checkbox" v-model="quickScan" class="sr-only peer">
+                <div class="w-11 h-6 bg-gray-500 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div>
+              </div>
+            </label>
+          </div>
+        </div>
 
-      <div v-else class="divide-y divide-slate-100">
-        <div
-          v-for="(item, index) in purchaseItems"
-          :key="index"
-          class="p-3"
-        >
-          <div class="flex items-start justify-between mb-2">
-            <div class="font-medium text-slate-800">{{ item.productName }}</div>
+        <!-- 相機錯誤 -->
+        <div v-if="cameraError" class="p-4 bg-amber-50 text-amber-800 text-sm border-t border-amber-100">
+          <p class="font-bold">📷 需要權限</p>
+          <p>{{ cameraError }}</p>
+        </div>
+
+        <!-- 手動輸入 -->
+        <div class="p-4 border-t border-slate-100 bg-white">
+          <div class="flex gap-2">
+            <input
+              v-model="manualProductCode"
+              type="text"
+              placeholder="手動輸入條碼..."
+              class="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              @keyup.enter="handleManualInput"
+            />
             <button
+              @click="handleManualInput"
+              :disabled="!manualProductCode.trim()"
+              class="w-12 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 flex items-center justify-center disabled:opacity-50 transition-colors"
+            >
+              ➤
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 採購清單 -->
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+        <div class="flex items-center justify-between p-4 border-b border-slate-50 bg-slate-50/50">
+          <h3 class="font-bold text-slate-700 flex items-center gap-2">
+            📦 採購項目 
+            <span class="bg-emerald-100 text-emerald-700 text-xs px-2 py-0.5 rounded-full font-bold">{{ purchaseItems.length }}</span>
+          </h3>
+          <button
+            v-if="purchaseItems.length > 0"
+            @click="clearList"
+            class="text-xs text-red-500 font-medium hover:bg-red-50 px-2 py-1 rounded transition-colors"
+          >
+            清空列表
+          </button>
+        </div>
+
+        <div v-if="purchaseItems.length === 0" class="py-12 flex flex-col items-center justify-center text-slate-300">
+          <div class="text-4xl mb-2">🛒</div>
+          <p class="text-sm">尚未加入任何商品</p>
+        </div>
+
+        <transition-group 
+          name="list" 
+          tag="div" 
+          class="divide-y divide-slate-50"
+        >
+          <div
+            v-for="(item, index) in purchaseItems"
+            :key="`${item.productId}-${index}`"
+            class="p-4 hover:bg-slate-50 transition-colors group relative"
+          >
+            <div class="flex justify-between items-start mb-2">
+              <span class="font-bold text-slate-800 text-base">{{ item.productName }}</span>
+              <span class="font-mono text-emerald-600 font-bold">${{ (item.qty * item.price).toFixed(0) }}</span>
+            </div>
+            
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <div class="flex items-center border border-slate-200 rounded-lg bg-white shadow-sm overflow-hidden">
+                   <button @click="item.qty > 1 ? item.qty-- : removeItem(index)" class="px-2 py-1 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 transition-colors">-</button>
+                   <input 
+                     v-model.number="item.qty" 
+                     type="number" 
+                     class="w-10 text-center text-sm font-bold text-slate-700 focus:outline-none py-1"
+                   />
+                   <button @click="item.qty++" class="px-2 py-1 text-slate-400 hover:text-emerald-500 hover:bg-emerald-50 transition-colors">+</button>
+                </div>
+                <span class="text-xs text-slate-400">{{ item.uomName }}</span>
+              </div>
+              
+              <div class="flex items-center gap-1">
+                <span class="text-xs text-slate-400">@</span>
+                <input
+                   v-model.number="item.price"
+                   type="number"
+                   class="w-16 bg-transparent border-b border-slate-200 text-right text-sm text-slate-500 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <!-- 刪除按鈕 (Hover 顯示) -->
+            <button 
               @click="removeItem(index)"
-              class="text-red-400 hover:text-red-600 text-lg leading-none"
+              class="absolute -right-2 -top-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center shadow-md opacity-0 group-hover:opacity-100 transition-opacity transform scale-75 group-hover:scale-100"
             >
               ✕
             </button>
           </div>
-          <div class="flex items-center gap-3 text-sm">
-            <div class="flex items-center gap-1">
-              <span class="text-slate-500">數量:</span>
-              <input
-                v-model.number="item.qty"
-                type="number"
-                min="1"
-                class="w-16 px-2 py-1 border border-slate-300 rounded text-center"
-                @change="updateItem"
-              />
-              <span class="text-slate-400">{{ item.uomName }}</span>
-            </div>
-            <div class="flex items-center gap-1">
-              <span class="text-slate-500">單價:</span>
-              <input
-                v-model.number="item.price"
-                type="number"
-                min="0"
-                step="0.01"
-                class="w-20 px-2 py-1 border border-slate-300 rounded text-center"
-                @change="updateItem"
-              />
-            </div>
-          </div>
-          <div class="text-right text-sm text-slate-600 mt-1">
-            小計: ${{ (item.qty * item.price).toFixed(0) }}
-          </div>
-        </div>
-      </div>
-
-      <!-- 合計 -->
-      <div v-if="purchaseItems.length > 0" class="p-3 border-t border-slate-200 bg-slate-50">
-        <div class="flex justify-between text-sm">
-          <span class="text-slate-600">合計: {{ purchaseItems.length }} 種 / {{ totalQty }} 項</span>
-          <span class="font-bold text-slate-800">總計: ${{ totalAmount.toFixed(0) }}</span>
-        </div>
+        </transition-group>
       </div>
     </div>
 
-    <!-- 提交按鈕 -->
-    <button
-      @click="submitOrder"
-      :disabled="!canSubmit || loading"
-      class="w-full py-4 bg-emerald-500 text-white font-bold rounded-lg hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-    >
-      <span v-if="loading" class="loading loading-spinner loading-sm"></span>
-      <span>✓ 完成採購單</span>
-    </button>
-
-    <!-- 新增供應商 Modal -->
-    <div
-      v-if="showAddVendor"
-      class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-      @click.self="showAddVendor = false"
-    >
-      <div class="bg-white rounded-xl p-6 max-w-sm w-full">
-        <h3 class="font-bold text-lg mb-4">新增供應商</h3>
-        <div class="mb-4">
-          <label class="block text-sm font-medium text-slate-700 mb-1">名稱 *</label>
-          <input
-            v-model="newVendorName"
-            type="text"
-            placeholder="例: 水果攤阿姨"
-            class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            @keyup.enter="handleAddVendor"
-          />
-        </div>
-        <div class="flex gap-2">
-          <button
-            @click="showAddVendor = false"
-            class="flex-1 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200"
-          >
-            取消
-          </button>
-          <button
-            @click="handleAddVendor"
-            :disabled="addingVendor || !newVendorName.trim()"
-            class="flex-1 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50"
-          >
-            <span v-if="addingVendor">建立中...</span>
-            <span v-else>建立</span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 加入清單 Modal -->
-    <div
-      v-if="showAddItemModal"
-      class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-      @click.self="showAddItemModal = false"
-    >
-      <div class="bg-white rounded-xl p-6 max-w-sm w-full">
-        <div class="text-center mb-4">
-          <div class="text-emerald-500 text-3xl mb-2">✓</div>
-          <div class="font-bold text-lg">{{ scannedProduct?.name }}</div>
-          <div class="text-sm text-slate-500">({{ scannedProduct?.value }})</div>
-          <div class="text-xs text-slate-400">單位: {{ scannedProduct?.uomName }}</div>
-        </div>
-
-        <div class="space-y-3 mb-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">數量 *</label>
-            <input
-              v-model.number="itemQty"
-              type="number"
-              min="1"
-              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-center text-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">單價 (選填，預設 1)</label>
-            <input
-              v-model.number="itemPrice"
-              type="number"
-              min="0"
-              step="0.01"
-              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-center text-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+    <!-- Sticky Footer Summary & Action -->
+    <div class="fixed bottom-0 inset-x-0 bg-white/90 backdrop-blur-md border-t border-slate-200 shadow-[0_-4px_20px_-5px_rgba(0,0,0,0.1)] p-4 pb-6 z-40 safe-area-bottom">
+      <div class="max-w-lg mx-auto flex gap-4 items-center">
+        <div class="flex-1">
+          <div class="text-xs text-slate-500 mb-0.5">預估總計</div>
+          <div class="flex items-baseline gap-1">
+            <span class="font-bold text-slate-400 text-sm">$</span>
+            <span class="text-2xl font-bold text-slate-800 tracking-tight">{{ totalAmount.toLocaleString() }}</span>
           </div>
         </div>
-
-        <div class="flex gap-2">
-          <button
-            @click="showAddItemModal = false"
-            class="flex-1 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200"
-          >
-            取消
-          </button>
-          <button
-            @click="addToList"
-            class="flex-1 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600"
-          >
-            加入清單
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 成功 Modal -->
-    <div
-      v-if="showSuccessModal"
-      class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-    >
-      <div class="bg-white rounded-xl p-6 max-w-sm w-full text-center">
-        <div class="text-emerald-500 text-5xl mb-4">✓</div>
-        <h3 class="font-bold text-xl mb-2">採購單建立成功</h3>
-        <div class="text-slate-600 mb-4">
-          <p>單號: <span class="font-mono font-bold">{{ orderResult?.documentNo }}</span></p>
-          <p class="text-sm text-slate-400 mt-2">系統將自動產生收貨單及發票</p>
-        </div>
+        
         <button
-          @click="continueScan"
-          class="w-full py-3 bg-blue-500 text-white font-bold rounded-lg hover:bg-blue-600"
+          @click="submitOrder"
+          :disabled="!canSubmit || loading"
+          class="flex-[2] bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-emerald-500/30 active:scale-95 transition-all disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2"
         >
-          繼續掃描
+          <span v-if="loading" class="loading loading-spinner loading-sm"></span>
+          <span v-else>確認送出 ({{ totalQty }})</span>
         </button>
       </div>
     </div>
 
+    <!-- 新增供應商 Modal -->
+    <transition enter-active-class="duration-200 ease-out" enter-from-class="opacity-0 scale-95" enter-to-class="opacity-100 scale-100" leave-active-class="duration-200 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
+      <div v-if="showAddVendor" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @click.self="showAddVendor = false">
+        <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+          <h3 class="font-bold text-lg mb-4 text-slate-800">新增供應商</h3>
+          <input
+            v-model="newVendorName"
+            type="text"
+            placeholder="請輸入名稱"
+            class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 mb-4 focus:ring-2 focus:ring-emerald-500 outline-none"
+            @keyup.enter="handleAddVendor"
+          />
+          <div class="flex gap-2">
+            <button @click="showAddVendor = false" class="flex-1 py-3 text-slate-500 font-medium hover:bg-slate-50 rounded-xl transition-colors">取消</button>
+            <button @click="handleAddVendor" class="flex-1 py-3 bg-emerald-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-500/20 hover:bg-emerald-600 transition-colors">建立</button>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- 加入商品 Modal (標準模式) -->
+    <transition enter-active-class="duration-200 ease-out" enter-from-class="opacity-0 translate-y-10" enter-to-class="opacity-100 translate-y-0" leave-active-class="duration-200 ease-in" leave-from-class="opacity-100 translate-y-0" leave-to-class="opacity-0 translate-y-10">
+      <div v-if="showAddItemModal" class="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4" @click.self="showAddItemModal = false">
+        <div class="fixed inset-0 bg-black/40 backdrop-blur-sm" @click="showAddItemModal = false"></div>
+        <div class="bg-white rounded-t-3xl sm:rounded-3xl p-6 w-full max-w-sm relative z-10 shadow-2xl">
+          <div class="w-12 h-1 bg-slate-200 rounded-full mx-auto mb-6 sm:hidden"></div>
+          
+          <div class="text-center mb-6">
+            <h3 class="font-bold text-xl text-slate-800 leading-tight mb-1">{{ scannedProduct?.name }}</h3>
+            <p class="text-sm text-slate-400 font-mono">{{ scannedProduct?.value }}</p>
+          </div>
+
+          <div class="flex items-center justify-center gap-4 mb-8">
+            <button @click="itemQty > 1 ? itemQty-- : null" class="w-12 h-12 rounded-full bg-slate-100 text-slate-600 text-xl font-bold flex items-center justify-center hover:bg-slate-200 transition-colors">-</button>
+            <div class="flex flex-col items-center w-24">
+              <input v-model.number="itemQty" type="number" class="w-full text-center text-3xl font-bold text-slate-800 bg-transparent outline-none p-0" />
+              <span class="text-xs text-slate-400">{{ scannedProduct?.uomName }}</span>
+            </div>
+            <button @click="itemQty++" class="w-12 h-12 rounded-full bg-slate-100 text-slate-600 text-xl font-bold flex items-center justify-center hover:bg-slate-200 transition-colors">+</button>
+          </div>
+          
+          <div class="mb-6">
+             <label class="block text-xs font-bold text-slate-400 text-center mb-2 uppercase">單價</label>
+             <input v-model.number="itemPrice" type="number" class="w-full text-center bg-slate-50 rounded-xl py-3 border border-slate-200 focus:ring-2 focus:ring-emerald-500 outline-none" />
+          </div>
+
+          <div class="flex gap-2">
+            <button @click="showAddItemModal = false" class="flex-1 py-3.5 text-slate-500 font-bold hover:bg-slate-50 rounded-xl transition-colors">取消</button>
+            <button @click="addToList" class="flex-[2] py-3.5 bg-emerald-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-500/30 hover:bg-emerald-600 transition-colors">加入清單</button>
+          </div>
+        </div>
+      </div>
+    </transition>
+
+    <!-- 成功 Modal -->
+    <transition enter-active-class="duration-300 ease-out" enter-from-class="opacity-0 scale-90" enter-to-class="opacity-100 scale-100">
+      <div v-if="showSuccessModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-white/90 backdrop-blur-xl">
+        <div class="text-center max-w-xs w-full">
+          <div class="w-24 h-24 bg-emerald-100 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-6 shadow-emerald-200/50 shadow-xl">
+            <svg class="w-12 h-12 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20 6L9 17l-5-5" />
+            </svg>
+          </div>
+          <h2 class="text-2xl font-bold text-slate-800 mb-2">採購單建立成功!</h2>
+          <p class="text-slate-500 mb-8">單號: <span class="font-mono font-bold text-slate-700">{{ orderResult?.documentNo }}</span></p>
+          
+          <button @click="continueScan" class="w-full py-4 bg-slate-900 text-white font-bold rounded-2xl shadow-xl hover:scale-105 transition-transform">
+            繼續掃描
+          </button>
+        </div>
+      </div>
+    </transition>
+
     <!-- Loading Overlay -->
-    <div
-      v-if="loading"
-      class="fixed inset-0 bg-black/30 flex items-center justify-center z-40"
-    >
-      <div class="bg-white rounded-lg p-4 flex items-center gap-3">
-        <span class="loading loading-spinner loading-md"></span>
-        <span>處理中...</span>
+    <div v-if="loading" class="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
+      <div class="bg-white p-4 rounded-full shadow-xl">
+        <span class="loading loading-spinner loading-md text-emerald-500"></span>
       </div>
     </div>
+
   </div>
 </template>
+
+<style scoped>
+/* List Transitions */
+.list-enter-active,
+.list-leave-active {
+  transition: all 0.3s ease;
+}
+.list-enter-from,
+.list-leave-to {
+  opacity: 0;
+  transform: translateX(-20px);
+}
+</style>
