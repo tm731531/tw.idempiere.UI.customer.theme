@@ -110,6 +110,20 @@ export const MENU_ITEMS: MenuItem[] = [
     path: '/inventory',
     description: '監控失智照顧耗材與安全庫存',
   },
+  {
+    id: 'L',
+    name: '掃描採購',
+    tableName: 'C_Order',
+    path: '/scan-purchase',
+    description: '掃描 QR Code 快速建立採購單',
+  },
+  {
+    id: 'M',
+    name: 'QR產生器',
+    tableName: 'M_Product',
+    path: '/qr-generator',
+    description: '產生產品 QR Code 供掃描採購使用',
+  },
 ]
 
 // System 專用選單

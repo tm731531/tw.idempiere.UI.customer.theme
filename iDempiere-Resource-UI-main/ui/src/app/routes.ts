@@ -9,8 +9,10 @@ import MomReportPage from './views/MomReportPage.vue'
 import OrderPage from './views/OrderPage.vue'
 import PaymentPage from './views/PaymentPage.vue'
 import ProductionPage from './views/ProductionPage.vue'
+import QRCodeGeneratorPage from './views/QRCodeGeneratorPage.vue'
 import ReportPage from './views/ReportPage.vue'
 import RequestPage from './views/RequestPage.vue'
+import ScanPurchasePage from './views/ScanPurchasePage.vue'
 import StockPage from './views/StockPage.vue'
 
 export const routes: RouteRecordRaw[] = [
@@ -29,4 +31,6 @@ export const routes: RouteRecordRaw[] = [
   { path: '/report', component: ReportPage },
   { path: '/mom-report', component: MomReportPage },
   { path: '/inventory', component: StockPage },
+  { path: '/scan-purchase', component: ScanPurchasePage },
+  { path: '/qr-generator', component: QRCodeGeneratorPage },
 ]
