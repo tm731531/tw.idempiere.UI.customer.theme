@@ -247,6 +247,7 @@ export async function createPurchaseOrder(token: string, data: PurchaseOrderData
   const docTypeId =  await getPurchaseOrderDocTypeId(token)
   console.log(data)
   // 2. 建立 Order Header
+  const dateOrdered = data.dateOrdered || new Date().toISOString().split('T')[0]
   const orderRes = await apiFetch<{ id: number }>(`${API_V1}/models/C_Order`, {
     method: 'POST',
     token,
@@ -256,7 +257,7 @@ export async function createPurchaseOrder(token: string, data: PurchaseOrderData
       IsSOTrx: false,
       M_Warehouse_ID: data.warehouseId,
       C_DocTypeTarget_ID: docTypeId,
-      DateOrdered: new Date().toISOString().split('T')[0]
+      DateOrdered: dateOrdered
     }
   })
 

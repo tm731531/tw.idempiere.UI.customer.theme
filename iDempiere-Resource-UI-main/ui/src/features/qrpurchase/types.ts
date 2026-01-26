@@ -32,6 +32,7 @@ export interface PurchaseOrderData {
   vendorId: number        // C_BPartner_ID
   warehouseId: number     // M_Warehouse_ID
   orgId?: number          // AD_Org_ID (Optional, inferred from warehouse if possible)
+  dateOrdered?: string    // 採購日期 (YYYY-MM-DD)，預設今天
   items: PurchaseItem[]   // 採購項目
 }
 

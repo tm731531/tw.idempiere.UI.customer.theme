@@ -26,7 +26,7 @@ export function usePermission() {
 
   const visibleMenuItems = computed<MenuItem[]>(() => {
     // 顯示的選單：Mom 報表 (J)、耗材庫存 (K)、掃描採購 (L)、QR產生器 (M)
-    const allowedIds = ['J', 'K', 'L', 'M']
+    const allowedIds = ['J', 'K', 'L', 'M','N']
     const allowedMenus = MENU_ITEMS.filter(item => allowedIds.includes(item.id))
 
     if (userType.value === 'System') {

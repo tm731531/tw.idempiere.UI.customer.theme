@@ -3,15 +3,15 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { Html5Qrcode } from 'html5-qrcode'
 import { useAuth } from '../../features/auth/store'
 import {
-  getVendors,
-  createVendor,
+  getCharges,
   getWarehouses,
   getProductByValue,
   getUOMName,
-  createPurchaseOrder,
+  createInternalUseInventory,
   parseQRCode
-} from '../../features/qrpurchase/api'
-import type { Vendor, Warehouse, PurchaseItem, CreateOrderResult } from '../../features/qrpurchase/types'
+} from '../../features/internaluse/api'
+import type { Charge, InternalUseItem, CreateInventoryResult } from '../../features/internaluse/types'
+import type { Warehouse } from '../../features/qrpurchase/types'
 
 const auth = useAuth()
 
@@ -20,19 +20,16 @@ const loading = ref(false)
 const error = ref('')
 const successMessage = ref('')
 
-// 供應商
-const vendors = ref<Vendor[]>([])
-const selectedVendorId = ref<number | null>(null)
-const showAddVendor = ref(false)
-const newVendorName = ref('')
-const addingVendor = ref(false)
+// 費用科目
+const charges = ref<Charge[]>([])
+const selectedChargeId = ref<number | null>(null)
 
 // 倉庫
 const warehouses = ref<Warehouse[]>([])
 const selectedWarehouseId = ref<number | null>(null)
 
 // 日期 (預設今天)
-const orderDate = ref(new Date().toISOString().split('T')[0])
+const movementDate = ref(new Date().toISOString().split('T')[0])
 
 // 掃描
 const scanning = ref(false)
@@ -47,22 +44,20 @@ const manualProductCode = ref('')
 const showAddItemModal = ref(false)
 const scannedProduct = ref<{ id: number; value: string; name: string; uomName: string } | null>(null)
 const itemQty = ref(1)
-const itemPrice = ref(1)
 
-// 採購清單
-const purchaseItems = ref<PurchaseItem[]>([])
+// 領用清單
+const internalUseItems = ref<InternalUseItem[]>([])
 
 // 成功結果
 const showSuccessModal = ref(false)
-const orderResult = ref<CreateOrderResult | null>(null)
+const inventoryResult = ref<CreateInventoryResult | null>(null)
 
 // 計算
-const totalQty = computed(() => purchaseItems.value.reduce((sum, i) => sum + i.qty, 0))
-const totalAmount = computed(() => purchaseItems.value.reduce((sum, i) => sum + i.qty * i.price, 0))
+const totalQty = computed(() => internalUseItems.value.reduce((sum, i) => sum + i.qty, 0))
 const canSubmit = computed(() =>
-  selectedVendorId.value !== null &&
+  selectedChargeId.value !== null &&
   selectedWarehouseId.value !== null &&
-  purchaseItems.value.length > 0
+  internalUseItems.value.length > 0
 )
 
 // 取得 token (確保非 null)
@@ -77,42 +72,25 @@ async function loadInitialData() {
   loading.value = true
   try {
     const token = getToken()
-    const [vendorList, warehouseList] = await Promise.all([
-      getVendors(token),
+    const [chargeList, warehouseList] = await Promise.all([
+      getCharges(token),
       getWarehouses(token)
     ])
-    vendors.value = vendorList
+    charges.value = chargeList
     warehouses.value = warehouseList
 
     // 預設選第一個倉庫
     if (warehouseList.length > 0) {
       selectedWarehouseId.value = warehouseList[0].id
     }
+    // 預設選第一個費用科目
+    if (chargeList.length > 0) {
+      selectedChargeId.value = chargeList[0].id
+    }
   } catch (e: any) {
     error.value = e.message || '載入資料失敗'
   } finally {
     loading.value = false
-  }
-}
-
-// 新增供應商
-async function handleAddVendor() {
-  if (!newVendorName.value.trim()) {
-    alert('請輸入供應商名稱')
-    return
-  }
-
-  addingVendor.value = true
-  try {
-    const vendor = await createVendor(getToken(), { name: newVendorName.value.trim() })
-    vendors.value.push(vendor)
-    selectedVendorId.value = vendor.id
-    showAddVendor.value = false
-    newVendorName.value = ''
-  } catch (e: any) {
-    alert(e.message || '新增供應商失敗')
-  } finally {
-    addingVendor.value = false
   }
 }
 
@@ -195,7 +173,6 @@ async function lookupProduct(productValue: string) {
       uomName
     }
     itemQty.value = 1
-    itemPrice.value = 1
     showAddItemModal.value = true
   } catch (e: any) {
     error.value = e.message || '查詢產品失敗'
@@ -208,14 +185,12 @@ async function lookupProduct(productValue: string) {
 function addToList() {
   if (!scannedProduct.value) return
 
-  purchaseItems.value.push({
+  internalUseItems.value.push({
     productId: scannedProduct.value.id,
     productValue: scannedProduct.value.value,
     productName: scannedProduct.value.name,
-    uomId: 0,
     uomName: scannedProduct.value.uomName,
-    qty: itemQty.value,
-    price: itemPrice.value
+    qty: itemQty.value
   })
 
   showAddItemModal.value = false
@@ -227,15 +202,15 @@ function addToList() {
 
 // 刪除項目
 function removeItem(index: number) {
-  purchaseItems.value.splice(index, 1)
+  internalUseItems.value.splice(index, 1)
   saveDraft()
 }
 
 // 清空清單
 function clearList() {
-  if (confirm('確定要清空採購清單嗎？')) {
-    purchaseItems.value = []
-    localStorage.removeItem('purchase_draft')
+  if (confirm('確定要清空領用清單嗎？')) {
+    internalUseItems.value = []
+    localStorage.removeItem('internal_use_draft')
   }
 }
 
@@ -246,41 +221,41 @@ function updateItem() {
 
 // 儲存草稿
 function saveDraft() {
-  localStorage.setItem('purchase_draft', JSON.stringify({
-    vendorId: selectedVendorId.value,
+  localStorage.setItem('internal_use_draft', JSON.stringify({
+    chargeId: selectedChargeId.value,
     warehouseId: selectedWarehouseId.value,
-    items: purchaseItems.value,
+    items: internalUseItems.value,
     savedAt: Date.now()
   }))
 }
 
 // 恢復草稿
 function restoreDraft() {
-  const draft = localStorage.getItem('purchase_draft')
+  const draft = localStorage.getItem('internal_use_draft')
   if (draft) {
     try {
       const data = JSON.parse(draft)
       // 檢查是否超過 24 小時
       if (Date.now() - data.savedAt > 24 * 60 * 60 * 1000) {
-        localStorage.removeItem('purchase_draft')
+        localStorage.removeItem('internal_use_draft')
         return
       }
 
       if (data.items?.length > 0) {
-        if (confirm(`發現未完成的採購清單 (${data.items.length} 項)，是否恢復？`)) {
-          purchaseItems.value = data.items
-          if (data.vendorId) selectedVendorId.value = data.vendorId
+        if (confirm(`發現未完成的領用清單 (${data.items.length} 項)，是否恢復？`)) {
+          internalUseItems.value = data.items
+          if (data.chargeId) selectedChargeId.value = data.chargeId
           if (data.warehouseId) selectedWarehouseId.value = data.warehouseId
         } else {
-          localStorage.removeItem('purchase_draft')
+          localStorage.removeItem('internal_use_draft')
         }
       }
     } catch {}
   }
 }
 
-// 提交採購單
-async function submitOrder() {
+// 提交領用單
+async function submitInventory() {
   if (!canSubmit.value) return
 
   loading.value = true
@@ -288,23 +263,23 @@ async function submitOrder() {
 
   try {
     const warehouse = warehouses.value.find(w => w.id === selectedWarehouseId.value)
-    
-    const result = await createPurchaseOrder(getToken(), {
-      vendorId: selectedVendorId.value!,
+
+    const result = await createInternalUseInventory(getToken(), {
+      chargeId: selectedChargeId.value!,
       warehouseId: selectedWarehouseId.value!,
       orgId: warehouse?.orgId,
-      dateOrdered: orderDate.value,
-      items: purchaseItems.value
+      movementDate: movementDate.value,
+      items: internalUseItems.value
     })
 
-    orderResult.value = result
+    inventoryResult.value = result
     showSuccessModal.value = true
 
     // 清空清單
-    purchaseItems.value = []
-    localStorage.removeItem('purchase_draft')
+    internalUseItems.value = []
+    localStorage.removeItem('internal_use_draft')
   } catch (e: any) {
-    error.value = e.message || '建立採購單失敗'
+    error.value = e.message || '建立領用單失敗'
   } finally {
     loading.value = false
   }
@@ -313,11 +288,11 @@ async function submitOrder() {
 // 繼續掃描
 function continueScan() {
   showSuccessModal.value = false
-  orderResult.value = null
+  inventoryResult.value = null
 }
 
 // 監聽清單變化
-watch(purchaseItems, () => {
+watch(internalUseItems, () => {
   saveDraft()
 }, { deep: true })
 
@@ -335,8 +310,8 @@ onUnmounted(() => {
   <div class="min-h-screen bg-slate-50 p-4">
     <!-- 標題 -->
     <div class="mb-4">
-      <h1 class="text-xl font-bold text-slate-800">掃描採購</h1>
-      <p class="text-sm text-slate-500">掃描產品 QR Code 快速建立採購單</p>
+      <h1 class="text-xl font-bold text-slate-800">掃描領用</h1>
+      <p class="text-sm text-slate-500">掃描產品 QR Code 快速建立內部領用單</p>
     </div>
 
     <!-- 錯誤訊息 -->
@@ -345,33 +320,13 @@ onUnmounted(() => {
       <button @click="error = ''" class="ml-2 text-red-500 hover:underline">關閉</button>
     </div>
 
-    <!-- 供應商與倉庫 -->
+    <!-- 倉庫與費用科目 -->
     <div class="bg-white rounded-lg shadow p-4 mb-4">
-      <!-- 供應商 -->
-      <div class="mb-3">
-        <label class="block text-sm font-medium text-slate-700 mb-1">
-          供應商 <span class="text-red-500">*</span>
-        </label>
-        <div class="flex gap-2">
-          <select
-            v-model="selectedVendorId"
-            class="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option :value="null">請選擇供應商</option>
-            <option v-for="v in vendors" :key="v.id" :value="v.id">{{ v.name }}</option>
-          </select>
-          <button
-            @click="showAddVendor = true"
-            class="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 text-sm whitespace-nowrap"
-          >
-            + 新增
-          </button>
-        </div>
-      </div>
-
       <!-- 倉庫 -->
       <div class="mb-3">
-        <label class="block text-sm font-medium text-slate-700 mb-1">入庫倉庫</label>
+        <label class="block text-sm font-medium text-slate-700 mb-1">
+          出庫倉庫 <span class="text-red-500">*</span>
+        </label>
         <select
           v-model="selectedWarehouseId"
           class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -380,11 +335,25 @@ onUnmounted(() => {
         </select>
       </div>
 
-      <!-- 採購日期 -->
+      <!-- 費用科目 -->
+      <div class="mb-3">
+        <label class="block text-sm font-medium text-slate-700 mb-1">
+          費用科目 (Charge) <span class="text-red-500">*</span>
+        </label>
+        <select
+          v-model="selectedChargeId"
+          class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          <option :value="null">請選擇費用科目</option>
+          <option v-for="c in charges" :key="c.id" :value="c.id">{{ c.name }}</option>
+        </select>
+      </div>
+
+      <!-- 領用日期 -->
       <div>
-        <label class="block text-sm font-medium text-slate-700 mb-1">採購日期</label>
+        <label class="block text-sm font-medium text-slate-700 mb-1">領用日期</label>
         <input
-          v-model="orderDate"
+          v-model="movementDate"
           type="date"
           class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
@@ -396,7 +365,7 @@ onUnmounted(() => {
       <div v-if="!scanning" class="text-center">
         <button
           @click="startScanner"
-          class="w-full py-4 bg-blue-500 text-white font-bold rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2"
+          class="w-full py-4 bg-orange-500 text-white font-bold rounded-lg hover:bg-orange-600 flex items-center justify-center gap-2"
         >
           <span class="text-2xl">📷</span>
           點擊開始掃描
@@ -442,12 +411,12 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 採購清單 -->
+    <!-- 領用清單 -->
     <div class="bg-white rounded-lg shadow mb-4">
       <div class="flex items-center justify-between p-3 border-b border-slate-100">
-        <span class="font-medium text-slate-800">📋 採購清單 ({{ purchaseItems.length }} 項)</span>
+        <span class="font-medium text-slate-800">📋 領用清單 ({{ internalUseItems.length }} 項)</span>
         <button
-          v-if="purchaseItems.length > 0"
+          v-if="internalUseItems.length > 0"
           @click="clearList"
           class="text-xs text-red-500 hover:underline"
         >
@@ -455,13 +424,13 @@ onUnmounted(() => {
         </button>
       </div>
 
-      <div v-if="purchaseItems.length === 0" class="p-8 text-center text-slate-400">
+      <div v-if="internalUseItems.length === 0" class="p-8 text-center text-slate-400">
         尚無商品，請開始掃描
       </div>
 
       <div v-else class="divide-y divide-slate-100">
         <div
-          v-for="(item, index) in purchaseItems"
+          v-for="(item, index) in internalUseItems"
           :key="index"
           class="p-3"
         >
@@ -486,79 +455,28 @@ onUnmounted(() => {
               />
               <span class="text-slate-400">{{ item.uomName }}</span>
             </div>
-            <div class="flex items-center gap-1">
-              <span class="text-slate-500">單價:</span>
-              <input
-                v-model.number="item.price"
-                type="number"
-                min="0"
-                step="0.01"
-                class="w-20 px-2 py-1 border border-slate-300 rounded text-center"
-                @change="updateItem"
-              />
-            </div>
-          </div>
-          <div class="text-right text-sm text-slate-600 mt-1">
-            小計: ${{ (item.qty * item.price).toFixed(0) }}
           </div>
         </div>
       </div>
 
       <!-- 合計 -->
-      <div v-if="purchaseItems.length > 0" class="p-3 border-t border-slate-200 bg-slate-50">
+      <div v-if="internalUseItems.length > 0" class="p-3 border-t border-slate-200 bg-slate-50">
         <div class="flex justify-between text-sm">
-          <span class="text-slate-600">合計: {{ purchaseItems.length }} 種 / {{ totalQty }} 項</span>
-          <span class="font-bold text-slate-800">總計: ${{ totalAmount.toFixed(0) }}</span>
+          <span class="text-slate-600">合計: {{ internalUseItems.length }} 種</span>
+          <span class="font-bold text-slate-800">總數量: {{ totalQty }}</span>
         </div>
       </div>
     </div>
 
     <!-- 提交按鈕 -->
     <button
-      @click="submitOrder"
+      @click="submitInventory"
       :disabled="!canSubmit || loading"
-      class="w-full py-4 bg-emerald-500 text-white font-bold rounded-lg hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+      class="w-full py-4 bg-orange-500 text-white font-bold rounded-lg hover:bg-orange-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
     >
       <span v-if="loading" class="loading loading-spinner loading-sm"></span>
-      <span>✓ 完成採購單</span>
+      <span>✓ 完成領用單</span>
     </button>
-
-    <!-- 新增供應商 Modal -->
-    <div
-      v-if="showAddVendor"
-      class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-      @click.self="showAddVendor = false"
-    >
-      <div class="bg-white rounded-xl p-6 max-w-sm w-full">
-        <h3 class="font-bold text-lg mb-4">新增供應商</h3>
-        <div class="mb-4">
-          <label class="block text-sm font-medium text-slate-700 mb-1">名稱 *</label>
-          <input
-            v-model="newVendorName"
-            type="text"
-            placeholder="例: 水果攤阿姨"
-            class="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            @keyup.enter="handleAddVendor"
-          />
-        </div>
-        <div class="flex gap-2">
-          <button
-            @click="showAddVendor = false"
-            class="flex-1 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200"
-          >
-            取消
-          </button>
-          <button
-            @click="handleAddVendor"
-            :disabled="addingVendor || !newVendorName.trim()"
-            class="flex-1 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50"
-          >
-            <span v-if="addingVendor">建立中...</span>
-            <span v-else>建立</span>
-          </button>
-        </div>
-      </div>
-    </div>
 
     <!-- 加入清單 Modal -->
     <div
@@ -568,7 +486,7 @@ onUnmounted(() => {
     >
       <div class="bg-white rounded-xl p-6 max-w-sm w-full">
         <div class="text-center mb-4">
-          <div class="text-emerald-500 text-3xl mb-2">✓</div>
+          <div class="text-orange-500 text-3xl mb-2">✓</div>
           <div class="font-bold text-lg">{{ scannedProduct?.name }}</div>
           <div class="text-sm text-slate-500">({{ scannedProduct?.value }})</div>
           <div class="text-xs text-slate-400">單位: {{ scannedProduct?.uomName }}</div>
@@ -576,21 +494,11 @@ onUnmounted(() => {
 
         <div class="space-y-3 mb-4">
           <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">數量 *</label>
+            <label class="block text-sm font-medium text-slate-700 mb-1">領用數量 *</label>
             <input
               v-model.number="itemQty"
               type="number"
               min="1"
-              class="w-full px-3 py-2 border border-slate-300 rounded-lg text-center text-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-700 mb-1">單價 (選填，預設 1)</label>
-            <input
-              v-model.number="itemPrice"
-              type="number"
-              min="0"
-              step="0.01"
               class="w-full px-3 py-2 border border-slate-300 rounded-lg text-center text-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -605,7 +513,7 @@ onUnmounted(() => {
           </button>
           <button
             @click="addToList"
-            class="flex-1 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600"
+            class="flex-1 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600"
           >
             加入清單
           </button>
@@ -619,15 +527,15 @@ onUnmounted(() => {
       class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
     >
       <div class="bg-white rounded-xl p-6 max-w-sm w-full text-center">
-        <div class="text-emerald-500 text-5xl mb-4">✓</div>
-        <h3 class="font-bold text-xl mb-2">採購單建立成功</h3>
+        <div class="text-orange-500 text-5xl mb-4">✓</div>
+        <h3 class="font-bold text-xl mb-2">領用單建立成功</h3>
         <div class="text-slate-600 mb-4">
-          <p>單號: <span class="font-mono font-bold">{{ orderResult?.documentNo }}</span></p>
-          <p class="text-sm text-slate-400 mt-2">系統將自動產生收貨單及發票</p>
+          <p>單號: <span class="font-mono font-bold">{{ inventoryResult?.documentNo }}</span></p>
+          <p class="text-sm text-slate-400 mt-2">庫存已自動扣減</p>
         </div>
         <button
           @click="continueScan"
-          class="w-full py-3 bg-blue-500 text-white font-bold rounded-lg hover:bg-blue-600"
+          class="w-full py-3 bg-orange-500 text-white font-bold rounded-lg hover:bg-orange-600"
         >
           繼續掃描
         </button>

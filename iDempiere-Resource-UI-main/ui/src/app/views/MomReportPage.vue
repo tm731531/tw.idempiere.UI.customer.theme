@@ -811,7 +811,7 @@ async function handleSave() {
             NightActivity: s(form.value.nightActivity), BeforeSleepStatus: s(form.value.beforeSleepStatus),
             LastNightSleep: s(form.value.lastNightSleep), MorningMentalStatus: s(form.value.morningMentalStatus),
             Breakfast: s(form.value.breakfast), DailyActivity: s(form.value.dailyActivity),
-            Lunch: s(form.value.lunch), Outgoing: s(form.value.outgoing), Dinner: s(form.value.dinner),
+            Lunch: s(form.value.lunch), outgoing: s(form.value.outgoing), Dinner: s(form.value.dinner),
             Companionship: s(form.value.companionship), ExcretionStatus: s(form.value.excretionStatus),
             Bathing: s(form.value.bathing), SafetyIncident: s(form.value.safetyIncident),
             // 生理數據 (PascalCase)

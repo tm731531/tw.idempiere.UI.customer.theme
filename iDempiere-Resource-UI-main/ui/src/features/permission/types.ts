@@ -124,6 +124,13 @@ export const MENU_ITEMS: MenuItem[] = [
     path: '/qr-generator',
     description: '產生產品 QR Code 供掃描採購使用',
   },
+  {
+    id: 'N',
+    name: '掃描領用',
+    tableName: 'M_Inventory',
+    path: '/scan-internal-use',
+    description: '掃描 QR Code 快速建立內部領用單',
+  },
 ]
 
 // System 專用選單

@@ -276,7 +276,7 @@ export interface MomPayload {
     Breakfast?: string | null
     DailyActivity?: string | null
     Lunch?: string | null
-    Outgoing?: string | null
+    outgoing?: string | null
     Dinner?: string | null
     Companionship?: string | null
     ExcretionStatus?: string | null
