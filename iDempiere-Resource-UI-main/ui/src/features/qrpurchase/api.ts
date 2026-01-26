@@ -190,7 +190,7 @@ export async function getPurchaseOrderDocTypeId(token: string): Promise<number> 
   const res = await apiFetch<{ records: any[] }>(`${API_V1}/models/C_DocType`, {
     token,
     searchParams: {
-      $filter: `DocBaseType eq 'POO' and IsActive eq true`,
+      $filter: `DocBaseType eq 'POO' and IsActive eq true and docsubtypeso eq 'WR'`,
       $select: 'C_DocType_ID,Name',
       $top: '1'
     }
@@ -244,7 +244,7 @@ export async function getDefaultTaxId(token: string): Promise<number> {
  */
 export async function createPurchaseOrder(token: string, data: PurchaseOrderData): Promise<CreateOrderResult> {
   // 1. 取得 DocType
-  const docTypeId = 1000016 // await getPurchaseOrderDocTypeId(token)
+  const docTypeId =  await getPurchaseOrderDocTypeId(token)
   console.log(data)
   // 2. 建立 Order Header
   const orderRes = await apiFetch<{ id: number }>(`${API_V1}/models/C_Order`, {
