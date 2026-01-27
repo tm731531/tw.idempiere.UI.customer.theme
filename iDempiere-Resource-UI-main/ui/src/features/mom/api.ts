@@ -196,20 +196,20 @@ export async function getMomAttachments(
 }
 
 /**
- * Fetch a single attachment's data (Base64).
+ * Fetch a single attachment's data as a Blob.
  */
 export async function getMomAttachmentData(
     token: string,
     recordId: number,
     filename: string
-): Promise<string | null> {
+): Promise<Blob | null> {
     try {
         const url = `${API_V1}/models/Z_momSystem/${recordId}/attachments/${encodeURIComponent(filename)}`;
         const res = await ky.get(url, {
             headers: { Authorization: `Bearer ${token}` }
-        }).json<{ data?: string }>();
+        }).blob();
 
-        return res.data || null;
+        return res;
     } catch (e) {
         console.error('Failed to fetch attachment data:', e);
         return null;
@@ -217,15 +217,61 @@ export async function getMomAttachmentData(
 }
 
 /**
+ * Compress an image using Canvas API
+ */
+async function compressImage(file: File, maxWidth = 1200, maxHeight = 1200, quality = 0.7): Promise<Blob> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (e) => {
+            const img = new Image();
+            img.src = e.target?.result as string;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+
+                if (width > height) {
+                    if (width > maxWidth) {
+                        height *= maxWidth / width;
+                        width = maxWidth;
+                    }
+                } else {
+                    if (height > maxHeight) {
+                        width *= maxHeight / height;
+                        height = maxHeight;
+                    }
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx?.drawImage(img, 0, 0, width, height);
+
+                canvas.toBlob((blob) => {
+                    if (blob) resolve(blob);
+                    else reject(new Error('Canvas to Blob failed'));
+                }, 'image/jpeg', quality);
+            };
+            img.onerror = (err) => reject(err);
+        };
+        reader.onerror = (err) => reject(err);
+    });
+}
+
+/**
  * Upload a photo attachment to a Mom record.
- * Uses same pattern as PDF upload, but with image content type.
+ * Uses same pattern as PDF upload, but with image compression.
  */
 export async function uploadMomPhoto(
     token: string,
     recordId: number,
     file: File
 ): Promise<void> {
-    // 1. Convert File to Base64
+    // 1. Compress Image
+    const compressedBlob = await compressImage(file);
+
+    // 2. Convert Blob to Base64
     const reader = new FileReader();
     const base64Promise = new Promise<string>((resolve, reject) => {
         reader.onload = () => {
@@ -234,13 +280,13 @@ export async function uploadMomPhoto(
             resolve(base64);
         };
         reader.onerror = reject;
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(compressedBlob);
     });
 
     const base64Data = await base64Promise;
 
-    // 2. Generate filename with timestamp
-    const ext = file.name.split('.').pop() || 'jpg';
+    // 3. Generate filename with timestamp
+    const ext = 'jpg'; // Always jpeg after compression
     const now = new Date();
     const timestamp = now.getFullYear().toString() +
         (now.getMonth() + 1).toString().padStart(2, '0') +
@@ -250,7 +296,7 @@ export async function uploadMomPhoto(
         now.getSeconds().toString().padStart(2, '0');
     const filename = `Photo_${timestamp}.${ext}`;
 
-    // 3. Upload
+    // 4. Upload
     const url = `${API_V1}/models/Z_momSystem/${recordId}/attachments`;
     await ky.post(url, {
         headers: { Authorization: `Bearer ${token}` },

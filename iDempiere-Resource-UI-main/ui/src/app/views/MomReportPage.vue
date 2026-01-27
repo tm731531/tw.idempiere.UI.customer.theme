@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import ErrorMessage from '../../components/ErrorMessage.vue'
 import { useAuth } from '../../features/auth/store'
-import { listMomData, type MomData, getLatestMomRecordId, uploadMomAttachment, createMomData, updateMomData, generateGeminiContent, getGeminiApiKey, fetchMomColumnMetadata, type MomPayload, completeMomRecord, runMomCompleteProcess, getMomAttachments, uploadMomPhoto, type MomAttachment } from '../../features/mom/api'
+import { listMomData, type MomData, getLatestMomRecordId, uploadMomAttachment, createMomData, updateMomData, generateGeminiContent, getGeminiApiKey, fetchMomColumnMetadata, type MomPayload, completeMomRecord, runMomCompleteProcess, getMomAttachments, uploadMomPhoto, type MomAttachment, getMomAttachmentData } from '../../features/mom/api'
 import { listRequests, type Request as RequestData } from '../../features/request/api'
 import { toPng } from 'html-to-image'
 import jsPDF from 'jspdf'
@@ -310,6 +310,8 @@ function isTomorrow(dateStr?: string): boolean {
 
 // ===== 照片附件 =====
 const attachments = ref<MomAttachment[]>([])
+const photoDataMap = ref<Record<string, string>>({}) // Store base64 data for photos
+const photoLoadingMap = ref<Record<string, boolean>>({}) // Track loading state for each photo
 const photoUploading = ref(false)
 const photoInputRef = ref<HTMLInputElement | null>(null)
 const showPhotoModal = ref(false)
@@ -319,10 +321,38 @@ const currentPhotoRecordId = ref<number | null>(null)
 async function loadAttachments(recordId: number) {
   if (!auth.token.value) return
   try {
-    attachments.value = await getMomAttachments(auth.token.value, recordId)
+    const list = await getMomAttachments(auth.token.value, recordId)
+    attachments.value = list
+
+    // Pre-fetch photo data for images specifically
+    const photos = list.filter(a => /\.(jpg|jpeg|png|gif|webp)$/i.test(a.name))
+    for (const photo of photos) {
+      if (!photoDataMap.value[photo.name]) {
+        fetchSpecificPhoto(recordId, photo.name)
+      }
+    }
   } catch (e) {
     console.error('Failed to load attachments:', e)
     attachments.value = []
+  }
+}
+
+async function fetchSpecificPhoto(recordId: number, filename: string) {
+  if (!auth.token.value) return
+  photoLoadingMap.value[filename] = true
+  try {
+    const blob = await getMomAttachmentData(auth.token.value, recordId, filename)
+    if (blob) {
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        photoDataMap.value[filename] = reader.result as string
+      }
+      reader.readAsDataURL(blob)
+    }
+  } catch (e) {
+    console.error(`Failed to fetch photo data for ${filename}:`, e)
+  } finally {
+    photoLoadingMap.value[filename] = false
   }
 }
 
@@ -1532,18 +1562,28 @@ watch([dateFrom, dateTo], () => loadData())
           <h3 class="text-sm font-bold text-slate-700 mb-3">已上傳照片 ({{ photoAttachments.length }})</h3>
           <div class="grid grid-cols-3 gap-4">
             <div v-for="photo in photoAttachments" :key="photo.name" class="relative group">
-              <a
-                :href="getAttachmentUrl(currentPhotoRecordId!, photo.name)"
-                target="_blank"
-                class="block aspect-square bg-slate-100 rounded-lg overflow-hidden border hover:border-purple-400 transition-colors"
-              >
-                <img
-                  :src="getAttachmentUrl(currentPhotoRecordId!, photo.name)"
-                  :alt="photo.name"
-                  class="w-full h-full object-cover"
-                  loading="lazy"
-                />
-              </a>
+              <div v-if="photoLoadingMap[photo.name]" class="aspect-square bg-slate-100 rounded-lg flex items-center justify-center">
+                <span class="loading loading-spinner loading-sm text-slate-300"></span>
+              </div>
+              <template v-else>
+                <a
+                  v-if="photoDataMap[photo.name]"
+                  :href="photoDataMap[photo.name]"
+                  target="_blank"
+                  class="block aspect-square bg-slate-100 rounded-lg overflow-hidden border hover:border-purple-400 transition-colors"
+                >
+                  <img
+                    :src="photoDataMap[photo.name]"
+                    :alt="photo.name"
+                    class="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                </a>
+                <div v-else class="aspect-square bg-slate-100 rounded-lg flex flex-col items-center justify-center">
+                   <span class="text-xs text-slate-400">無法讀取</span>
+                   <button @click="fetchSpecificPhoto(currentPhotoRecordId!, photo.name)" class="text-[10px] text-purple-600 hover:underline">重試</button>
+                </div>
+              </template>
               <div class="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] p-1 truncate opacity-0 group-hover:opacity-100 transition-opacity">
                 {{ photo.name }}
               </div>
