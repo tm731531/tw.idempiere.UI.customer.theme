@@ -24,18 +24,29 @@ export async function getPurchasableProducts(token: string): Promise<Product[]> 
     token,
     searchParams: {
       $filter: `IsActive eq true`,
-      $select: 'M_Product_ID,Name,Value,C_UOM_ID',
+      $select: 'M_Product_ID,Name,Value,C_UOM_ID,UPC,M_Product_Category_ID',
       $orderby: 'Name'
     }
   })
-  console.log('[QR] 產品查詢結果:', res)
+  console.log('[QR] 產品查詢原始結果 (一條):', res.records?.[0])
 
-  return (res.records || []).map(r => ({
-    id: r.M_Product_ID?.id ?? r.M_Product_ID ?? r.id,
-    value: r.Value,
-    name: r.Name,
-    uomId: r.C_UOM_ID?.id ?? r.C_UOM_ID
-  }))
+  return (res.records || []).map(r => {
+    // 取得分類 ID (處理物件或原始值)
+    const catVal = r.M_Product_Category_ID || r.m_product_category_id || r.categoryId
+    const catId = catVal?.id ?? catVal
+
+    // 取得 UPC/EAN
+    const upc = r.UPC || r.upc || r.UPCEAN || ''
+
+    return {
+      id: r.M_Product_ID?.id ?? r.M_Product_ID ?? r.id,
+      value: r.Value || r.value || r.SearchKey,
+      name: r.Name || r.name,
+      uomId: r.C_UOM_ID?.id ?? r.C_UOM_ID ?? r.uomId,
+      upc: upc,
+      categoryId: catId
+    }
+  })
 }
 
 /**
@@ -77,7 +88,9 @@ export async function getProductByValue(token: string, value: string): Promise<P
     id: r.M_Product_ID?.id ?? r.M_Product_ID ?? r.id,
     value: r.Value,
     name: r.Name,
-    uomId: r.C_UOM_ID?.id ?? r.C_UOM_ID
+    upc: r.UPC,
+    uomId: r.C_UOM_ID?.id ?? r.C_UOM_ID,
+    categoryId: r.M_Product_Category_ID?.id ?? r.M_Product_Category_ID
   }
 }
 
@@ -432,7 +445,7 @@ export async function createProduct(token: string, data: { value: string, name: 
             M_Product_ID: productId,
             PriceStd: data.price,
             PriceList: data.price,
-            PriceLimit: data.price
+            PriceLimit: 0
           }
         })
         console.log(`[QR] 已將產品 ${productId} 加入價格表版本 ${versionId}, 價格: ${data.price}`)
@@ -447,6 +460,67 @@ export async function createProduct(token: string, data: { value: string, name: 
     value: data.value,
     name: data.name,
     uomId: data.uomId
+  }
+}
+
+/**
+ * 更新產品資訊
+ */
+export async function updateProduct(token: string, productId: number, data: { name?: string, uomId?: number, categoryId?: number, upc?: string }): Promise<void> {
+  const updateData: any = {}
+  if (data.name) updateData.Name = data.name
+  if (data.uomId) updateData.C_UOM_ID = data.uomId
+  if (data.categoryId) updateData.M_Product_Category_ID = data.categoryId
+  if (data.upc !== undefined) updateData.UPC = data.upc
+
+  await apiFetch(`${API_V1}/models/M_Product/${productId}`, {
+    method: 'PUT',
+    token,
+    json: updateData
+  })
+}
+
+/**
+ * 取得產品的廠商採購歷史紀錄 (從 C_OrderLine 抓取真實交易)
+ */
+export async function getProductPriceHistory(token: string, productId: number): Promise<{ vendorName: string, price: number, date?: string }[]> {
+  try {
+    const res = await apiFetch<{ records: any[] }>(`${API_V1}/models/C_OrderLine`, {
+      token,
+      searchParams: {
+        $filter: `M_Product_ID eq ${productId} and IsActive eq true`,
+        $select: 'PriceActual,C_Order_ID',
+        $expand: 'C_Order_ID($select=C_BPartner_ID,DateOrdered,IsSOTrx)',
+        $orderby: 'Updated desc',
+        $top: '10'
+      }
+    })
+
+    if (!res.records || res.records.length === 0) return []
+
+    // 過濾出採購單 (非銷售單)
+    const poLines = res.records.filter(r => r.C_Order_ID?.IsSOTrx === false || r.C_Order_ID?.IsSOTrx === 'N')
+
+    // 取得所有廠商名稱進行對照
+    const vendors = await getVendors(token)
+    const vendorMap = new Map(vendors.map(v => [v.id, v.name]))
+
+    console.log('[QR] 採購歷史原始紀錄 (一條):', poLines[0])
+
+    return poLines.map(r => {
+      const vId = r.C_Order_ID?.C_BPartner_ID?.id ?? r.C_Order_ID?.C_BPartner_ID
+      const dateVal = r.C_Order_ID?.DateOrdered || r.C_Order_ID?.dateOrdered
+      const date = dateVal?.split('T')[0] || ''
+
+      return {
+        vendorName: vendorMap.get(Number(vId)) || `廠商 #${vId}`,
+        price: r.PriceActual || r.priceActual || 0,
+        date: date
+      }
+    })
+  } catch (e) {
+    console.warn('[QR] 取得採購歷史失敗:', e)
+    return []
   }
 }
 

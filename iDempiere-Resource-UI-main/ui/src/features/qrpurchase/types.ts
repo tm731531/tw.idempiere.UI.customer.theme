@@ -14,6 +14,8 @@ export interface Product {
   name: string            // M_Product.Name (名稱)
   uomId: number           // C_UOM_ID
   uomName?: string        // C_UOM.Name (單位名稱)
+  upc?: string           // UPC/EAN (條碼)
+  categoryId?: number     // M_Product_Category_ID
 }
 
 /** 掃描清單項目 */
