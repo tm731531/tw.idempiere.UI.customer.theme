@@ -2,7 +2,10 @@
 import { onMounted, ref, computed } from 'vue'
 import { useAuth } from '../../features/auth/store'
 import { listProductStock, type ProductStock } from '../../features/stock/api'
+import { parseQRCode } from '../../features/qrpurchase/api'
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
 import ErrorMessage from '../../components/ErrorMessage.vue'
+import { nextTick, onUnmounted } from 'vue'
 
 const auth = useAuth()
 const stocks = ref<ProductStock[]>([])
@@ -28,7 +31,8 @@ const filteredStocks = computed(() => {
   if (searchQuery.value) {
     result = result.filter(s => 
       s.productName.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-      s.productValue.toLowerCase().includes(searchQuery.value.toLowerCase())
+      s.productValue.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
+      (s.upc && s.upc.toLowerCase().includes(searchQuery.value.toLowerCase()))
     )
   }
   // Sort: prioritize expired > expiring soon > below safety > others
@@ -46,6 +50,68 @@ const filteredStocks = computed(() => {
   })
 })
 
+// 掃描功能
+const scanning = ref(false)
+const scannerReady = ref(false)
+let html5QrCode: Html5Qrcode | null = null
+
+async function startScanner() {
+  scanning.value = true
+  await nextTick()
+
+  try {
+    html5QrCode = new Html5Qrcode('qr-reader', {
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.UPC_EAN_EXTENSION
+      ],
+      verbose: false
+    })
+    await html5QrCode.start(
+      { facingMode: 'environment' },
+      {
+        fps: 10,
+        qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+          const minEdge = Math.min(viewfinderWidth, viewfinderHeight)
+          return { width: Math.floor(minEdge * 0.8), height: Math.floor(minEdge * 0.6) }
+        },
+        aspectRatio: 1.0
+      },
+      onScanSuccess,
+      () => {}
+    )
+    scannerReady.value = true
+  } catch (e) {
+    console.error('Scanner start error', e)
+    scanning.value = false
+  }
+}
+
+async function stopScanner() {
+  if (html5QrCode) {
+    try { await html5QrCode.stop() } catch {}
+    html5QrCode = null
+  }
+  scanning.value = false
+  scannerReady.value = false
+}
+
+function onScanSuccess(decodedText: string) {
+  stopScanner()
+  const parsed = parseQRCode(decodedText)
+  if (parsed) {
+    searchQuery.value = parsed.product
+  }
+}
+
+onUnmounted(() => stopScanner())
+
 onMounted(() => fetchStocks())
 </script>
 
@@ -58,12 +124,20 @@ onMounted(() => fetchStocks())
           <p class="text-xs text-slate-500">檢視當前已有的品項及其分庫數量</p>
         </div>
         <div class="flex items-center gap-3">
-          <input 
-            v-model="searchQuery" 
-            type="text" 
-            placeholder="搜尋商品名稱..." 
-            class="rounded-lg border border-slate-200 px-4 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 w-64"
-          />
+          <div class="relative w-64">
+            <input 
+              v-model="searchQuery" 
+              type="text" 
+              placeholder="搜尋名稱、編碼或條碼..." 
+              class="w-full rounded-lg border border-slate-200 pl-4 pr-10 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button 
+              @click="startScanner" 
+              class="absolute inset-y-0 right-0 px-3 text-slate-400 hover:text-blue-500"
+            >
+              📷
+            </button>
+          </div>
           <button 
             @click="fetchStocks" 
             :disabled="loading"
@@ -73,6 +147,16 @@ onMounted(() => fetchStocks())
           </button>
         </div>
       </div>
+    </div>
+
+    <div v-show="scanning" class="rounded-2xl border bg-black overflow-hidden relative mb-6">
+      <div id="qr-reader" class="w-full"></div>
+      <button 
+        @click="stopScanner" 
+        class="absolute bottom-4 right-4 bg-white/20 backdrop-blur-md text-white px-4 py-2 rounded-lg text-xs"
+      >
+        關閉掃描
+      </button>
     </div>
 
     <ErrorMessage :message="error" />
@@ -93,7 +177,10 @@ onMounted(() => fetchStocks())
           <tr v-for="item in filteredStocks" :key="item.productId" class="hover:bg-slate-50 transition-colors" :class="{ 'bg-red-50/30': item.isBelowSafety || item.isExpired, 'bg-orange-50/30': item.isExpiringSoon && !item.isExpired }">
             <td class="px-6 py-4">
               <div class="font-bold text-slate-800">{{ item.productName }}</div>
-              <div class="text-[10px] text-slate-400 font-mono">{{ item.productValue }}</div>
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] text-slate-400 font-mono">{{ item.productValue }}</span>
+                <span v-if="item.upc" class="text-[10px] bg-slate-100 px-1.5 py-0.25 rounded text-slate-500 font-mono">EAN: {{ item.upc }}</span>
+              </div>
             </td>
             <td class="px-6 py-4">
               <div class="flex flex-wrap justify-center gap-2">

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { Html5Qrcode } from 'html5-qrcode'
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from 'html5-qrcode'
 import { useAuth } from '../../features/auth/store'
 import {
   getCharges,
@@ -8,7 +8,10 @@ import {
   getProductByValue,
   getUOMName,
   createInternalUseInventory,
-  parseQRCode
+  parseQRCode,
+  getUOMs,
+  getProductCategories,
+  createProduct
 } from '../../features/internaluse/api'
 import type { Charge, InternalUseItem, CreateInventoryResult } from '../../features/internaluse/types'
 import type { Warehouse } from '../../features/qrpurchase/types'
@@ -23,6 +26,13 @@ const successMessage = ref('')
 // 費用科目
 const charges = ref<Charge[]>([])
 const selectedChargeId = ref<number | null>(null)
+
+// 新產品
+const showCreateProductModal = ref(false)
+const uoms = ref<{ id: number; name: string }[]>([])
+const categories = ref<{ id: number; name: string }[]>([])
+const newProductForm = ref({ value: '', name: '', uomId: 0, categoryId: 0, price: 0 })
+const creatingProduct = ref(false)
 
 // 倉庫
 const warehouses = ref<Warehouse[]>([])
@@ -72,12 +82,16 @@ async function loadInitialData() {
   loading.value = true
   try {
     const token = getToken()
-    const [chargeList, warehouseList] = await Promise.all([
+    const [chargeList, warehouseList, uomList, catList] = await Promise.all([
       getCharges(token),
-      getWarehouses(token)
+      getWarehouses(token),
+      getUOMs(token),
+      getProductCategories(token)
     ])
     charges.value = chargeList
     warehouses.value = warehouseList
+    uoms.value = uomList
+    categories.value = catList
 
     // 預設選第一個倉庫
     if (warehouseList.length > 0) {
@@ -101,12 +115,35 @@ async function startScanner() {
   await nextTick()
 
   try {
-    html5QrCode = new Html5Qrcode('qr-reader')
+    html5QrCode = new Html5Qrcode('qr-reader', {
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.QR_CODE,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.UPC_EAN_EXTENSION
+      ],
+      experimentalFeatures: {
+        useBarCodeDetectorIfSupported: true
+      },
+      verbose: false
+    })
     await html5QrCode.start(
       { facingMode: 'environment' },
       {
         fps: 10,
-        qrbox: { width: 250, height: 250 }
+        // 動態調整掃描框，使其適應寬條碼
+        qrbox: (viewfinderWidth, viewfinderHeight) => {
+          const minEdge = Math.min(viewfinderWidth, viewfinderHeight)
+          return {
+            width: Math.floor(minEdge * 0.8),
+            height: Math.floor(minEdge * 0.6)
+          }
+        },
+        aspectRatio: 1.0
       },
       onScanSuccess,
       () => {} // ignore scan failure
@@ -160,8 +197,16 @@ async function lookupProduct(productValue: string) {
     const token = getToken()
     const product = await getProductByValue(token, productValue)
     if (!product) {
-      error.value = `找不到產品: ${productValue}`
-      return
+       // 找不到產品 -> 開啟建立產品視窗
+       newProductForm.value = {
+         value: productValue,
+         name: '',
+         uomId: uoms.value[0]?.id || 0,
+         categoryId: categories.value[0]?.id || 0,
+         price: 0
+       }
+       showCreateProductModal.value = true
+       return
     }
 
     const uomName = await getUOMName(token, product.uomId)
@@ -178,6 +223,32 @@ async function lookupProduct(productValue: string) {
     error.value = e.message || '查詢產品失敗'
   } finally {
     loading.value = false
+  }
+}
+
+// 建立新產品
+async function handleCreateProduct() {
+  if (!newProductForm.value.name) return
+  creatingProduct.value = true
+  try {
+    const product = await createProduct(getToken(), newProductForm.value)
+    
+    // 直接加入領用清單
+    scannedProduct.value = {
+      id: product.id,
+      value: product.value,
+      name: product.name,
+      uomName: uoms.value.find(u => u.id === product.uomId)?.name || '單位'
+    }
+    itemQty.value = 1
+    
+    addToList()
+    
+    showCreateProductModal.value = false
+  } catch(e: any) {
+    alert(e.message || '建立產品失敗')
+  } finally {
+    creatingProduct.value = false
   }
 }
 
@@ -542,15 +613,52 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- Loading Overlay -->
-    <div
-      v-if="loading"
-      class="fixed inset-0 bg-black/30 flex items-center justify-center z-40"
-    >
-      <div class="bg-white rounded-lg p-4 flex items-center gap-3">
-        <span class="loading loading-spinner loading-md"></span>
-        <span>處理中...</span>
+
+    <!-- 建立新產品 Modal -->
+    <transition enter-active-class="duration-200 ease-out" enter-from-class="opacity-0 scale-95" enter-to-class="opacity-100 scale-100" leave-active-class="duration-200 ease-in" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
+      <div v-if="showCreateProductModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm" @click.self="showCreateProductModal = false">
+        <div class="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl overflow-y-auto max-h-[90vh]">
+          <h3 class="font-bold text-lg mb-4 text-slate-800">✨ 發現新商品</h3>
+          
+          <div class="space-y-4">
+             <div>
+               <label class="block text-xs font-bold text-slate-500 uppercase mb-1">條碼 (Barcode)</label>
+               <input v-model="newProductForm.value" type="text" disabled class="w-full bg-slate-100 border border-slate-200 rounded-xl px-4 py-3 text-slate-500 font-mono" />
+             </div>
+             
+             <div>
+               <label class="block text-xs font-bold text-slate-500 uppercase mb-1">商品名稱 <span class="text-red-500">*</span></label>
+               <input v-model="newProductForm.name" type="text" placeholder="例如: 舒潔衛生紙 110抽" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-orange-500 outline-none" />
+             </div>
+
+             <div class="grid grid-cols-2 gap-4">
+               <div>
+                  <label class="block text-xs font-bold text-slate-500 uppercase mb-1">分類 <span class="text-red-500">*</span></label>
+                  <select v-model="newProductForm.categoryId" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 focus:ring-2 focus:ring-orange-500 outline-none text-sm">
+                    <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.name }}</option>
+                  </select>
+               </div>
+               <div>
+                  <label class="block text-xs font-bold text-slate-500 uppercase mb-1">單位 <span class="text-red-500">*</span></label>
+                  <select v-model="newProductForm.uomId" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-3 focus:ring-2 focus:ring-orange-500 outline-none text-sm">
+                    <option v-for="u in uoms" :key="u.id" :value="u.id">{{ u.name }}</option>
+                  </select>
+               </div>
+             </div>
+          </div>
+
+          <div class="flex gap-2 mt-6">
+            <button @click="showCreateProductModal = false" class="flex-1 py-3 text-slate-500 font-medium hover:bg-slate-50 rounded-xl transition-colors">取消</button>
+            <button 
+              @click="handleCreateProduct" 
+              :disabled="creatingProduct || !newProductForm.name"
+              class="flex-1 py-3 bg-orange-500 text-white font-bold rounded-xl shadow-lg shadow-orange-500/20 hover:bg-orange-600 transition-colors disabled:opacity-50"
+            >
+              {{ creatingProduct ? '建立中...' : '建立並加入' }}
+            </button>
+          </div>
+        </div>
       </div>
-    </div>
+    </transition>
   </div>
 </template>

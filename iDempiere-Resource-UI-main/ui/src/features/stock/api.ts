@@ -6,6 +6,7 @@ export interface ProductStock {
     productId: number
     productValue: string
     productName: string
+    upc: string
     warehouseStocks: {
         warehouseId: number
         warehouseName: string
@@ -31,7 +32,7 @@ export async function listProductStock(token: string): Promise<ProductStock[]> {
     try {
         const res = await apiFetch<any>(`${API_V1}/models/M_Product`, {
             token,
-            searchParams: { $select: 'Value,Name', $top: 1000 }
+            searchParams: { $select: 'Value,Name,UPC', $top: 1000 }
         })
         products = res.records || []
     } catch (e) {
@@ -270,6 +271,7 @@ export async function listProductStock(token: string): Promise<ProductStock[]> {
             productId: pId,
             productValue: p.Value,
             productName: p.Name,
+            upc: p.UPC || '',
             warehouseStocks,
             totalQty,
             totalSafetyStock,

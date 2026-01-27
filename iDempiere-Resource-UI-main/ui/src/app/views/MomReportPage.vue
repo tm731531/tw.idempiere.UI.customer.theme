@@ -736,19 +736,20 @@ async function handleAiGenerate() {
 1. 站在醫療專業角度，分析數據背後可能的臨床意涵（如：睡眠障礙對情緒的影響、生理數值與日常表現的關聯）。
 2. 提供臨床觀察重點（如：建議醫師關注某項指標的變動）。
 3. 報告是提供給醫師看的，請保持專業、精確且中立。
+4. **精簡扼要**：醫師閱讀時間寶貴，每個章節的內容請控制在 3~4 行以內 (約 80-100 字)，直接切入重點，避免冗長敘述。
 
 請務必以 JSON 格式回傳，結構如下：
 {
   "period": "YYYY/MM/DD - YYYY/MM/DD",
-  "overall_summary": "對這段期間患者健康狀態的專業臨床評估總結",
+  "overall_summary": "對這段期間患者健康狀態的專業臨床評估總結 (精簡扼要)",
   "sections": [
     {
       "title": "臨床觀測分組 (例如：神經精神症狀分析、循環與代謝觀察、營養與體能評估)",
       "status": "Stable / Vigilant / Observation / Critical",
-      "content": "深入的臨床觀察與數據交叉分析"
+      "content": "精簡扼要的臨床觀察重點與數據交叉分析 (請勿長篇大論)"
     }
   ],
-  "conclusion": "給醫師的專業提示與臨床觀察建議結語"
+  "conclusion": "給醫師的專業提示與臨床觀察建議結語 (精簡扼要)"
 }`
       : `你是一位專業的健康數據分析助理。請根據以下照護紀錄，產出一份「客觀數據量化分析」報告。
 報告對象：主治醫師。
@@ -758,19 +759,20 @@ async function handleAiGenerate() {
 1. 僅針對現有紀錄進行客觀彙整、統計與現象描述（如：出現頻率、具體日期、數值波動、數據分布）。
 2. **絕對禁止**提供任何診斷建議、治療方案或病理判斷。
 3. 保持數據導向，清晰呈現各項指標的統計現況。
+4. **精簡扼要**：每個章節的內容請控制在 3~4 行以內 (約 80-100 字)，僅列出關鍵數據變化，避免流水帳。
 
 請務必以 JSON 格式回傳，結構如下：
 {
   "period": "YYYY/MM/DD - YYYY/MM/DD",
-  "overall_summary": "對這段期間數據現象的客觀量化總結",
+  "overall_summary": "對這段期間數據現象的客觀量化總結 (精簡扼要)",
   "sections": [
     {
       "title": "數據統計類別 (例如：睡眠時數統計、異常事件頻率、飲食攝取達成率)",
       "status": "Stable / Vigilant / Observation / Critical",
-      "content": "具體的數據統計現象匯總，需提及具體次數與日期"
+      "content": "精簡扼要的數據統計現象匯總 (請勿長篇大論)"
     }
   ],
-  "conclusion": "數據趨勢的客觀結語"
+  "conclusion": "數據趨勢的客觀結語 (精簡扼要)"
 }`;
 
     const promptWithData = `${prompt}\n\n紀錄數據：\n${dataText}`
@@ -979,11 +981,11 @@ watch([dateFrom, dateTo], () => loadData())
         <div style="font-size:12px; color:#64748b; margin-top:5px;">週期：{{ dateFrom }} ~ {{ dateTo }} | 生成日期：{{ new Date().toLocaleDateString() }}</div>
       </div>
 
-      <!-- AI Results (Two Columns if both generated) -->
-      <div v-if="aiDataSummary || aiMedicalSummary" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(450px, 1fr)); gap:20px; margin-bottom:30px;">
+      <!-- AI Results (Vertical Stack) -->
+      <div v-if="aiDataSummary || aiMedicalSummary" style="display:flex; flex-direction:column; gap:30px; margin-bottom:30px;">
         
         <!-- Data Analysis Card -->
-        <div v-if="aiDataSummary" style="border:1px solid #e2e8f0; border-radius:12px; background:#fff; overflow:hidden; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); page-break-inside: avoid;">
+        <div v-if="aiDataSummary" style="border:1px solid #e2e8f0; border-radius:12px; background:#fff; overflow:hidden; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); page-break-inside: avoid; max-width: 800px; margin: 0 auto; width: 100%;">
           <div style="background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); padding:12px 20px; color:#fff; display:flex; justify-content:space-between; align-items:center;">
             <div style="display:flex; align-items:center; gap:8px;">
               <span style="font-size:18px;">📊</span>
@@ -991,26 +993,26 @@ watch([dateFrom, dateTo], () => loadData())
             </div>
             <span style="font-size:10px; opacity:0.8; font-weight:600;">{{ aiDataSummary.period }}</span>
           </div>
-          <div style="padding:15px;">
-            <p style="margin:0 0 15px 0; font-size:13px; color:#1e293b; line-height:1.6; font-weight:500; border-left:3px solid #6366f1; padding-left:12px;">{{ aiDataSummary.overall_summary }}</p>
-            <div style="display:grid; gap:12px; margin-bottom:15px;">
-              <div v-for="(section, sIdx) in aiDataSummary.sections" :key="sIdx" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                  <h5 style="margin:0; font-size:12px; font-weight:800; color:#334155;">{{ section.title }}</h5>
-                  <span :style="{ fontSize: '9px', fontWeight: '800', padding: '1px 6px', borderRadius: '10px', color: '#fff', background: section.status === 'Stable' ? '#10b981' : (section.status === 'Vigilant' ? '#f59e0b' : (section.status === 'Critical' ? '#ef4444' : '#6366f1')) }">{{ section.status }}</span>
+          <div style="padding:24px;">
+            <p style="margin:0 0 20px 0; font-size:15px; color:#1e293b; line-height:1.7; font-weight:500; border-left:3px solid #6366f1; padding-left:16px; letter-spacing: 0.02em;">{{ aiDataSummary.overall_summary }}</p>
+            <div style="display:grid; gap:16px; margin-bottom:20px;">
+              <div v-for="(section, sIdx) in aiDataSummary.sections" :key="sIdx" style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:12px; padding:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                  <h5 style="margin:0; font-size:14px; font-weight:800; color:#334155; letter-spacing: 0.02em;">{{ section.title }}</h5>
+                  <span :style="{ fontSize: '10px', fontWeight: '800', padding: '2px 8px', borderRadius: '12px', color: '#fff', background: section.status === 'Stable' ? '#10b981' : (section.status === 'Vigilant' ? '#f59e0b' : (section.status === 'Critical' ? '#ef4444' : '#6366f1')) }">{{ section.status }}</span>
                 </div>
-                <p style="margin:0; font-size:11px; color:#475569; line-height:1.5;">{{ section.content }}</p>
+                <p style="margin:0; font-size:14px; color:#475569; line-height:1.7; letter-spacing: 0.015em;">{{ section.content }}</p>
               </div>
             </div>
-            <div style="background:#f1f5f9; border-radius:8px; padding:12px;">
-              <h4 style="margin:0 0 6px 0; font-size:12px; color:#475569; font-weight:800;">📝 觀測結語</h4>
-              <p style="margin:0; font-size:11px; color:#1e293b; line-height:1.4;">{{ aiDataSummary.conclusion }}</p>
+            <div style="background:#f1f5f9; border-radius:12px; padding:16px;">
+              <h4 style="margin:0 0 8px 0; font-size:14px; color:#475569; font-weight:800; letter-spacing: 0.02em;">📝 觀測結語</h4>
+              <p style="margin:0; font-size:14px; color:#1e293b; line-height:1.7; letter-spacing: 0.015em;">{{ aiDataSummary.conclusion }}</p>
             </div>
           </div>
         </div>
 
         <!-- Medical Perspective Card -->
-        <div v-if="aiMedicalSummary" style="border:1px solid #fecaca; border-radius:12px; background:#fff; overflow:hidden; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); page-break-inside: avoid;">
+        <div v-if="aiMedicalSummary" style="border:1px solid #fecaca; border-radius:12px; background:#fff; overflow:hidden; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); page-break-inside: avoid; max-width: 800px; margin: 0 auto; width: 100%;">
           <div style="background: linear-gradient(135deg, #e11d48 0%, #fb7185 100%); padding:12px 20px; color:#fff; display:flex; justify-content:space-between; align-items:center;">
             <div style="display:flex; align-items:center; gap:8px;">
               <span style="font-size:18px;">🩺</span>
@@ -1018,20 +1020,20 @@ watch([dateFrom, dateTo], () => loadData())
             </div>
             <span style="font-size:10px; opacity:0.8; font-weight:600;">{{ aiMedicalSummary.period }}</span>
           </div>
-          <div style="padding:15px;">
-            <p style="margin:0 0 15px 0; font-size:13px; color:#1e293b; line-height:1.6; font-weight:500; border-left:3px solid #e11d48; padding-left:12px;">{{ aiMedicalSummary.overall_summary }}</p>
-            <div style="display:grid; gap:12px; margin-bottom:15px;">
-              <div v-for="(section, sIdx) in aiMedicalSummary.sections" :key="sIdx" style="background:#fff1f2; border:1px solid #fecaca; border-radius:8px; padding:10px;">
-                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-                  <h5 style="margin:0; font-size:12px; font-weight:800; color:#9f1239;">{{ section.title }}</h5>
-                  <span :style="{ fontSize: '9px', fontWeight: '800', padding: '1px 6px', borderRadius: '10px', color: '#fff', background: section.status === 'Stable' ? '#10b981' : (section.status === 'Vigilant' ? '#f59e0b' : (section.status === 'Critical' ? '#e11d48' : '#fb7185')) }">{{ section.status }}</span>
+          <div style="padding:24px;">
+            <p style="margin:0 0 20px 0; font-size:15px; color:#1e293b; line-height:1.7; font-weight:500; border-left:3px solid #e11d48; padding-left:16px; letter-spacing: 0.02em;">{{ aiMedicalSummary.overall_summary }}</p>
+            <div style="display:grid; gap:16px; margin-bottom:20px;">
+              <div v-for="(section, sIdx) in aiMedicalSummary.sections" :key="sIdx" style="background:#fff1f2; border:1px solid #fecaca; border-radius:12px; padding:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                  <h5 style="margin:0; font-size:14px; font-weight:800; color:#9f1239; letter-spacing: 0.02em;">{{ section.title }}</h5>
+                  <span :style="{ fontSize: '10px', fontWeight: '800', padding: '2px 8px', borderRadius: '12px', color: '#fff', background: section.status === 'Stable' ? '#10b981' : (section.status === 'Vigilant' ? '#f59e0b' : (section.status === 'Critical' ? '#e11d48' : '#fb7185')) }">{{ section.status }}</span>
                 </div>
-                <p style="margin:0; font-size:11px; color:#be123c; line-height:1.5;">{{ section.content }}</p>
+                <p style="margin:0; font-size:14px; color:#be123c; line-height:1.7; letter-spacing: 0.015em;">{{ section.content }}</p>
               </div>
             </div>
-            <div style="background:#fff5f5; border-radius:8px; padding:12px; border:1px dashed #fecaca;">
-              <h4 style="margin:0 0 6px 0; font-size:12px; color:#9f1239; font-weight:800;">🏥 臨床追蹤與提示</h4>
-              <p style="margin:0; font-size:11px; color:#881337; line-height:1.4;">{{ aiMedicalSummary.conclusion }}</p>
+            <div style="background:#fff5f5; border-radius:12px; padding:16px; border:1px dashed #fecaca;">
+              <h4 style="margin:0 0 8px 0; font-size:14px; color:#9f1239; font-weight:800; letter-spacing: 0.02em;">🏥 臨床追蹤與提示</h4>
+              <p style="margin:0; font-size:14px; color:#881337; line-height:1.7; letter-spacing: 0.015em;">{{ aiMedicalSummary.conclusion }}</p>
             </div>
           </div>
         </div>
@@ -1254,7 +1256,7 @@ watch([dateFrom, dateTo], () => loadData())
                 <th style="padding:10px; border-bottom:2px solid #cbd5e1;">活動狀況</th>
                 <th style="padding:10px; border-bottom:2px solid #cbd5e1;">生理維護</th>
                 <th style="padding:10px; text-align:left; border-bottom:2px solid #cbd5e1;">備註 (Memo)</th>
-                <th style="padding:10px; border-bottom:2px solid #cbd5e1;" class="no-export">操作</th>
+                <th style="padding:10px; border-bottom:2px solid #cbd5e1; position:sticky; right:0; background:#f1f5f9; z-index:10; box-shadow:-2px 0 5px rgba(0,0,0,0.05);" class="no-export">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -1333,7 +1335,7 @@ watch([dateFrom, dateTo], () => loadData())
                   <span v-else style="color:#94a3b8;">—</span>
                 </td>
                 <!-- Actions -->
-                <td style="padding:10px; text-align:center;" class="no-export">
+                <td style="padding:10px; text-align:center; position:sticky; right:0; background:#fff; z-index:5; box-shadow:-2px 0 5px rgba(0,0,0,0.05);" class="no-export">
                    <div class="flex flex-col gap-1 items-center">
                       <button v-if="!row.isProcessed" @click="openEditModal(row)" class="text-blue-600 font-bold hover:underline text-xs">編輯</button>
                       <button @click="openPhotoModal(row.id)" class="text-purple-600 font-bold hover:underline text-xs">📷 照片</button>

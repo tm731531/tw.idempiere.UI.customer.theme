@@ -221,5 +221,13 @@ export async function createInternalUseInventory(
 }
 
 // 復用 qrpurchase 的函數
-export { getWarehouses, getProductByValue, getUOMName, parseQRCode } from '../qrpurchase/api'
+export {
+  getWarehouses,
+  getProductByValue,
+  getUOMName,
+  parseQRCode,
+  getUOMs,
+  getProductCategories,
+  createProduct
+} from '../qrpurchase/api'
 export type { Warehouse, Product } from '../qrpurchase/types'

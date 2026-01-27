@@ -49,8 +49,8 @@ export async function getProductByValue(token: string, value: string): Promise<P
   let res = await apiFetch<{ records: any[] }>(`${API_V1}/models/M_Product`, {
     token,
     searchParams: {
-      $filter: `Value eq '${value}' and IsActive eq true`,
-      $select: 'M_Product_ID,Name,Value,C_UOM_ID'
+      $filter: `(Value eq '${value}' or UPC eq '${value}') and IsActive eq true`,
+      $select: 'M_Product_ID,Name,Value,UPC,C_UOM_ID'
     }
   })
   console.log('[QR] 按 Value 查詢結果:', res)
@@ -62,7 +62,7 @@ export async function getProductByValue(token: string, value: string): Promise<P
       token,
       searchParams: {
         $filter: `Name eq '${value}' and IsActive eq true`,
-        $select: 'M_Product_ID,Name,Value,C_UOM_ID'
+        $select: 'M_Product_ID,Name,Value,UPC,C_UOM_ID'
       }
     })
     console.log('[QR] 按 Name 查詢結果:', res)
@@ -244,7 +244,7 @@ export async function getDefaultTaxId(token: string): Promise<number> {
  */
 export async function createPurchaseOrder(token: string, data: PurchaseOrderData): Promise<CreateOrderResult> {
   // 1. 取得 DocType
-  const docTypeId =  await getPurchaseOrderDocTypeId(token)
+  const docTypeId = await getPurchaseOrderDocTypeId(token)
   console.log(data)
   // 2. 建立 Order Header
   const dateOrdered = data.dateOrdered || new Date().toISOString().split('T')[0]
@@ -314,14 +314,190 @@ export function parseQRCode(content: string): { product: string } | null {
   try {
     // 嘗試 JSON 格式: {"product":"BANANA"}
     const data = JSON.parse(content)
-    if (data.product) {
+    if (typeof data === 'object' && data !== null && data.product) {
       return { product: data.product }
     }
   } catch {
-    // 非 JSON，可能是純文字產品編碼
-    if (content && content.trim()) {
-      return { product: content.trim() }
+    // 非 JSON，忽略錯誤繼續往下處理
+  }
+
+  // 非 JSON 或是純數字 (Barcode)，直接回傳內容
+  if (content && content.trim()) {
+    return { product: content.trim() }
+  }
+
+  return null
+}
+
+/**
+ * 取得所有單位 (UOM)
+ */
+export async function getUOMs(token: string): Promise<{ id: number, name: string }[]> {
+  const res = await apiFetch<{ records: any[] }>(`${API_V1}/models/C_UOM`, {
+    token,
+    searchParams: {
+      $filter: `IsActive eq true`,
+      $select: 'C_UOM_ID,Name',
+      $orderby: 'Name'
+    }
+  })
+
+  return (res.records || []).map(r => ({
+    id: r.C_UOM_ID?.id ?? r.C_UOM_ID ?? r.id,
+    name: r.Name
+  }))
+}
+
+/**
+ * 取得產品分類
+ */
+export async function getProductCategories(token: string): Promise<{ id: number, name: string }[]> {
+  const res = await apiFetch<{ records: any[] }>(`${API_V1}/models/M_Product_Category`, {
+    token,
+    searchParams: {
+      $filter: `IsActive eq true`,
+      $select: 'M_Product_Category_ID,Name',
+      $orderby: 'Name'
+    }
+  })
+
+  return (res.records || []).map(r => ({
+    id: r.M_Product_Category_ID?.id ?? r.M_Product_Category_ID ?? r.id,
+    name: r.Name
+  }))
+}
+
+/**
+ * 取得稅務分類列表
+ */
+export async function getTaxCategories(token: string): Promise<{ id: number, name: string }[]> {
+  const res = await apiFetch<{ records: any[] }>(`${API_V1}/models/C_TaxCategory`, {
+    token,
+    searchParams: {
+      $filter: `IsActive eq true`,
+      $select: 'C_TaxCategory_ID,Name',
+      $orderby: 'Name'
+    }
+  })
+
+  return (res.records || []).map(r => ({
+    id: r.C_TaxCategory_ID?.id ?? r.C_TaxCategory_ID ?? r.id,
+    name: r.Name
+  }))
+}
+
+/**
+ * 建立新產品
+ */
+export async function createProduct(token: string, data: { value: string, name: string, uomId: number, categoryId: number, price?: number }): Promise<Product> {
+  // 1. 取得預設稅務分類 (必填)
+  const taxCats = await getTaxCategories(token)
+  const taxCategoryId = taxCats[0]?.id
+
+  if (!taxCategoryId) {
+    throw new Error('系統中找不到有效的稅務分類 (C_TaxCategory)，請確認 iDempiere 設定')
+  }
+
+  // 2. 建立產品
+  const productRes = await apiFetch<{ id: number }>(`${API_V1}/models/M_Product`, {
+    method: 'POST',
+    token,
+    json: {
+      Value: data.value,
+      Name: data.name,
+      UPC: data.value, // 同步存入 UPC/EAN 欄位
+      C_UOM_ID: data.uomId,
+      M_Product_Category_ID: data.categoryId,
+      C_TaxCategory_ID: taxCategoryId, // 加入稅務分類
+      ProductType: 'I', // Item
+      IsSummary: false,
+      IsStocked: true,
+      IsPurchased: true,
+      IsSold: true
+    }
+  })
+
+  const productId = productRes.id
+
+  // 3. 如果有價格，將產品加入價格表 (M_ProductPrice)
+  if (data.price !== undefined) {
+    try {
+      const versionId = await getPurchasePriceVersionId(token)
+      if (versionId) {
+        await apiFetch(`${API_V1}/models/M_ProductPrice`, {
+          method: 'POST',
+          token,
+          json: {
+            M_PriceList_Version_ID: versionId,
+            M_Product_ID: productId,
+            PriceStd: data.price,
+            PriceList: data.price,
+            PriceLimit: data.price
+          }
+        })
+        console.log(`[QR] 已將產品 ${productId} 加入價格表版本 ${versionId}, 價格: ${data.price}`)
+      }
+    } catch (e) {
+      console.warn('[QR] 自動加入價格表失敗 (非致命錯誤):', e)
     }
   }
-  return null
+
+  return {
+    id: productId,
+    value: data.value,
+    name: data.name,
+    uomId: data.uomId
+  }
+}
+
+/**
+ * 取得採購價格表版本 ID (名稱含 '採購表')
+ */
+export async function getPurchasePriceVersionId(token: string): Promise<number | null> {
+  try {
+    // 1. 找價格表 (M_PriceList)
+    const plRes = await apiFetch<{ records: any[] }>(`${API_V1}/models/M_PriceList`, {
+      token,
+      searchParams: {
+        $filter: `Name eq '採購表' and IsActive eq true`,
+        $select: 'M_PriceList_ID',
+        $top: '1'
+      }
+    })
+
+    const priceListId = plRes.records?.[0]?.M_PriceList_ID?.id ?? plRes.records?.[0]?.M_PriceList_ID ?? plRes.records?.[0]?.id
+    if (!priceListId) return null
+
+    // 2. 找該價格表的最新版本 (M_PriceList_Version)
+    const verRes = await apiFetch<{ records: any[] }>(`${API_V1}/models/M_PriceList_Version`, {
+      token,
+      searchParams: {
+        $filter: `M_PriceList_ID eq ${priceListId} and IsActive eq true`,
+        $select: 'M_PriceList_Version_ID',
+        $orderby: 'ValidFrom desc',
+        $top: '1'
+      }
+    })
+
+    return verRes.records?.[0]?.M_PriceList_Version_ID?.id ?? verRes.records?.[0]?.M_PriceList_Version_ID ?? verRes.records?.[0]?.id ?? null
+  } catch (e) {
+    console.warn('[QR] 取得價格表失敗:', e)
+    return null
+  }
+}
+
+/**
+ * 取得產品價格
+ */
+export async function getProductPrice(token: string, versionId: number, productId: number): Promise<number> {
+  const res = await apiFetch<{ records: any[] }>(`${API_V1}/models/M_ProductPrice`, {
+    token,
+    searchParams: {
+      $filter: `M_PriceList_Version_ID eq ${versionId} and M_Product_ID eq ${productId} and IsActive eq true`,
+      $select: 'PriceStd', // 使用標準價
+      $top: '1'
+    }
+  })
+
+  return res.records?.[0]?.PriceStd || 0
 }
