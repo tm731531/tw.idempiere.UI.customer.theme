@@ -1,0 +1,12 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: MXP eMUI
+Bundle-SymbolicName: tw.mxp.emui
+Bundle-Version: 1.0.0.qualifier
+Bundle-Vendor: MXP
+Bundle-ClassPath: .,
+ web-content/
+Web-ContextPath: /emui
+Jetty-Environment: ee8
+Import-Package: javax.servlet;version="4.0.0",javax.servlet.http;version="4.0.0"
+Created-By: 17.0.17 (Eclipse Adoptium)
